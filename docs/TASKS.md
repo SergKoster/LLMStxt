@@ -20,8 +20,9 @@
 - [x] `Dockerfile` и `docker-compose.yml`
 - [x] `README.md` с инструкцией по запуску
 - [x] Проверка критериев приёмки локально, без Docker (habr.com, priisk.pro, несуществующий URL)
-- [ ] Проверить сборку и запуск в Docker (Docker Desktop падал при старте)
-- [ ] Репозиторий на GitHub и выкладка на поддомен (нужен владелец)
+- [x] Проверить сборку и запуск в Docker (habr.com, priisk.pro, несуществующий URL)
+- [x] Репозиторий на GitHub: https://github.com/SergKoster/LLMStxt
+- [ ] Выкладка на поддомен (нужен владелец: адрес и доступ к серверу)
 
 ## Этап 2 — дополнения
 
