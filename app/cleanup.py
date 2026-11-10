@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shutil
 import time
 from pathlib import Path
 
@@ -11,16 +12,20 @@ log = logging.getLogger("llms.cleanup")
 
 
 def remove_old_files(directory: Path, max_age: float, now: float | None = None) -> int:
-    """Удаляет файлы старше max_age секунд. Возвращает, сколько удалено."""
+    """Удаляет файлы и забытые рабочие папки старше max_age секунд. Возвращает, сколько удалено."""
     now = time.time() if now is None else now
     removed = 0
     if not directory.exists():
         return 0
     for path in directory.iterdir():
         try:
-            if path.is_file() and now - path.stat().st_mtime > max_age:
+            if now - path.stat().st_mtime <= max_age:
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
                 path.unlink()
-                removed += 1
+            removed += 1
         except OSError as exc:
             log.warning("Не удалось удалить %s: %s", path, exc)
     return removed

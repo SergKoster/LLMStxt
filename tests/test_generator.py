@@ -1,9 +1,12 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from app import config, generator
 from app.generator import GenerationError, build_command, generate, pick_max_pages
+
+SITE_BYTES = b"# Site\n"
 
 
 def test_pick_max_pages_without_crawl_delay_hits_the_cap():
@@ -28,12 +31,21 @@ def test_command_follows_the_task(tmp_path):
     assert command[command.index("--output") + 1] == str(tmp_path / "x.txt")
 
 
-def fake_run(returncode=0, stderr="", content="# Site\n"):
+def test_full_flag_is_added_only_on_request(tmp_path):
+    assert "--full" not in build_command("https://example.com", tmp_path / "llms.txt", 10)
+    assert "--full" in build_command("https://example.com", tmp_path / "llms.txt", 10, full=True)
+
+
+def fake_run(returncode=0, stderr="", content=SITE_BYTES):
+    """Подмена llms-gen: пишет файлы туда же, куда писала бы настоящая команда."""
+
     def run(command, **kwargs):
         assert kwargs["timeout"] == 180
+        output = Path(command[command.index("--output") + 1])
         if content is not None:
-            with open(command[command.index("--output") + 1], "w", encoding="utf-8") as file:
-                file.write(content)
+            output.write_bytes(content)
+            if "--full" in command:
+                output.with_stem("llms-full").write_bytes(content + "\nВесь текст страницы.\n".encode())
         return subprocess.CompletedProcess(command, returncode, "", stderr)
 
     return run
@@ -44,12 +56,28 @@ def no_network(monkeypatch):
     monkeypatch.setattr(generator, "read_crawl_delay", lambda url: 0.0)
 
 
-def test_generate_writes_final_file(tmp_path, monkeypatch):
+def test_generate_writes_llms_txt(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run())
-    output = tmp_path / "task.txt"
-    generate("https://example.com", output)
-    assert output.read_text(encoding="utf-8") == "# Site\n"
-    assert not (tmp_path / "task.txt.part").exists()
+    produced = generate("https://example.com", tmp_path / "work")
+    assert list(produced) == ["llms.txt"]
+    assert produced["llms.txt"].read_bytes() == SITE_BYTES
+
+
+def test_generate_full_gives_both_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", fake_run())
+    produced = generate("https://example.com", tmp_path / "work", full=True)
+    assert list(produced) == ["llms.txt", "llms-full.txt"]
+    assert "Весь текст страницы." in produced["llms-full.txt"].read_text(encoding="utf-8")
+
+
+def test_missing_full_file_is_an_error(tmp_path, monkeypatch):
+    def run(command, **kwargs):  # llms-gen написал только основной файл
+        Path(command[command.index("--output") + 1]).write_bytes(SITE_BYTES)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(GenerationError):
+        generate("https://example.com", tmp_path / "work", full=True)
 
 
 def test_broken_entries_are_glued_back():
@@ -67,23 +95,28 @@ def test_broken_entries_are_glued_back():
     assert fixed.endswith("- [Обычная](https://example.com/a/): всё хорошо\n")
 
 
+def test_full_text_after_entry_stays_separate():
+    # в llms-full.txt после пункта идёт пустая строка и текст страницы — его приклеивать нельзя
+    full = "# Сайт\n\n## Раздел\n\n- [Страница](https://example.com/a/): описание\n\nТекст страницы.\n"
+    assert generator.fix_broken_entries(full) == full
+
+
 def test_generate_timeout(tmp_path, monkeypatch):
     def run(command, **kwargs):
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(GenerationError, match="180 секунд"):
-        generate("https://example.com", tmp_path / "task.txt")
+        generate("https://example.com", tmp_path / "work")
 
 
 def test_generate_no_pages(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run(1, "ERROR: No pages found. Check the URL and try again.", None))
     with pytest.raises(GenerationError, match="Не удалось прочитать страницы"):
-        generate("https://example.com", tmp_path / "task.txt")
-    assert not (tmp_path / "task.txt").exists()
+        generate("https://example.com", tmp_path / "work")
 
 
 def test_generate_empty_file_is_an_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(subprocess, "run", fake_run(0, "", ""))
+    monkeypatch.setattr(subprocess, "run", fake_run(0, "", b""))
     with pytest.raises(GenerationError):
-        generate("https://example.com", tmp_path / "task.txt")
+        generate("https://example.com", tmp_path / "work")

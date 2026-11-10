@@ -1,4 +1,5 @@
 const POLL_INTERVAL_MS = 3000;
+const ARCHIVE_NAME = "llms.zip";
 
 const form = document.getElementById("form");
 const input = document.getElementById("url");
@@ -6,9 +7,22 @@ const button = document.getElementById("submit");
 const loading = document.getElementById("loading");
 const errorBox = document.getElementById("error");
 const doneBox = document.getElementById("done");
+const doneText = document.getElementById("done-text");
 const downloadLink = document.getElementById("download");
+const fileRows = [...document.querySelectorAll("#files li")].map((row) => ({
+  box: row.querySelector("input"),
+  status: row.querySelector(".status"),
+}));
 
 let fileUrl = null;
+let chosen = []; // имена файлов, выбранных для текущей генерации
+
+// Подпись у каждого выбранного файла: «генерируется», «сгенерирован» или пусто.
+function setFileStatus(text) {
+  for (const row of fileRows) {
+    row.status.textContent = chosen.includes(row.box.value) ? text : "";
+  }
+}
 
 // state: "idle" | "loading" | "error" | "done"
 function show(state, text) {
@@ -16,8 +30,13 @@ function show(state, text) {
   errorBox.hidden = state !== "error";
   doneBox.hidden = state !== "done";
   errorBox.textContent = state === "error" ? text : "";
-  button.disabled = state === "loading";
-  input.disabled = state === "loading";
+  const busy = state === "loading";
+  button.disabled = busy;
+  input.disabled = busy;
+  for (const row of fileRows) row.box.disabled = busy;
+  if (state === "loading") setFileStatus("генерируется");
+  else if (state === "done") setFileStatus("сгенерирован");
+  else setFileStatus("");
 }
 
 function checkUrl(value) {
@@ -37,10 +56,13 @@ function errorText(data) {
   return "Что-то пошло не так. Попробуйте ещё раз.";
 }
 
-function saveFile(blob) {
+function offerFile(blob) {
+  const isArchive = chosen.length > 1;
   if (fileUrl) URL.revokeObjectURL(fileUrl);
   fileUrl = URL.createObjectURL(blob);
   downloadLink.href = fileUrl;
+  downloadLink.download = isArchive ? ARCHIVE_NAME : chosen[0];
+  doneText.textContent = isArchive ? "Ваш архив готов" : "Ваш файл готов";
   show("done");
 }
 
@@ -56,7 +78,7 @@ async function poll(taskId) {
 
   const type = response.headers.get("content-type") || "";
   if (!type.includes("application/json")) {
-    if (response.ok) saveFile(await response.blob());
+    if (response.ok) offerFile(await response.blob());
     else show("error", errorText(null));
     return;
   }
@@ -72,18 +94,20 @@ async function poll(taskId) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const url = input.value.trim();
-  const problem = checkUrl(url);
+  const files = fileRows.filter((row) => row.box.checked).map((row) => row.box.value);
+  const problem = checkUrl(url) || (files.length ? null : "Выберите, что сгенерировать.");
   if (problem) {
     show("error", problem);
     return;
   }
 
+  chosen = files;
   show("loading");
   try {
     const response = await fetch("/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, files }),
     });
     const data = await response.json();
     if (!response.ok || !data.task_id) {

@@ -1,9 +1,12 @@
 """Хранилище задач в памяти и фоновая функция генерации."""
 
 import logging
+import os
+import shutil
 import threading
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,8 +36,35 @@ class TooManyTasks(Exception):
     pass
 
 
-def output_path(task_id: str) -> Path:
-    return config.OUTPUT_DIR / f"{task_id}.txt"
+# Готовый результат задачи — всегда один файл в OUTPUT_DIR. Его имя говорит, что внутри.
+_RESULTS = (
+    (".txt", config.LLMS_FILE),
+    (".full.txt", config.FULL_FILE),
+    (".zip", config.ARCHIVE_NAME),
+)
+_SUFFIX_BY_FILE = {name: suffix for suffix, name in _RESULTS}
+
+
+def find_result(task_id: str) -> tuple[Path, str] | None:
+    """Готовый файл задачи и имя, под которым его скачает пользователь."""
+    for suffix, download_name in _RESULTS:
+        path = config.OUTPUT_DIR / f"{task_id}{suffix}"
+        if path.is_file():
+            return path, download_name
+    return None
+
+
+def _pack(task_id: str, produced: dict[str, Path], files: list[str]) -> None:
+    """Один выбранный файл отдаём как есть, несколько — одним zip-архивом."""
+    if len(files) == 1:
+        os.replace(produced[files[0]], config.OUTPUT_DIR / f"{task_id}{_SUFFIX_BY_FILE[files[0]]}")
+        return
+    archive = config.OUTPUT_DIR / f"{task_id}.zip"
+    part = archive.with_name(archive.name + ".part")  # чтобы не отдать недописанный архив
+    with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in files:
+            zf.write(produced[name], arcname=name)
+    os.replace(part, archive)
 
 
 def create_task() -> str:
@@ -60,11 +90,13 @@ def _finish(task_id: str, status: str, error: str = "") -> None:
             task.error = error
 
 
-def run_task(task_id: str, url: str) -> None:
+def run_task(task_id: str, url: str, files: list[str]) -> None:
     """Фоновая функция: запускается через BackgroundTasks в отдельном потоке."""
+    work_dir = config.OUTPUT_DIR / f"{task_id}.work"
     with _slots:
         try:
-            generate(url, output_path(task_id))
+            produced = generate(url, work_dir, full=config.FULL_FILE in files)
+            _pack(task_id, produced, files)
         except GenerationError as exc:
             _finish(task_id, ERROR, str(exc))
         except Exception:
@@ -72,6 +104,8 @@ def run_task(task_id: str, url: str) -> None:
             _finish(task_id, ERROR, "Внутренняя ошибка сервиса. Попробуйте ещё раз.")
         else:
             _finish(task_id, DONE)
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def forget_old_tasks(max_age: float, now: float | None = None) -> int:

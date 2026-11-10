@@ -7,6 +7,12 @@ from pathlib import Path
 # Куда складываются готовые файлы. В Docker это /tmp/llms_outputs (как в задании).
 OUTPUT_DIR = Path(os.getenv("LLMS_OUTPUT_DIR", Path(tempfile.gettempdir()) / "llms_outputs"))
 
+# --- Что умеем генерировать ---
+LLMS_FILE = "llms.txt"
+FULL_FILE = "llms-full.txt"
+AVAILABLE_FILES = (LLMS_FILE, FULL_FILE)  # в этом порядке файлы лежат в архиве
+ARCHIVE_NAME = "llms.zip"  # отдаётся, когда выбрано больше одного файла
+
 # --- Требования из задания ---
 GENERATION_TIMEOUT_SECONDS = 180  # жёсткий предел на одну генерацию
 CRAWL_DEPTH = 3  # --depth

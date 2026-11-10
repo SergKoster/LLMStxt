@@ -12,8 +12,12 @@
            aria-label="URL сайта" required>
     <button id="submit" type="submit">Сгенерировать</button>
     <span id="loading" class="spinner" role="status" aria-label="Загрузка" hidden></span>
+    <ul id="files">
+      <li><label><input type="checkbox" name="files" value="llms.txt" checked> llms.txt</label> <span class="status"></span></li>
+      <li><label><input type="checkbox" name="files" value="llms-full.txt"> llms-full.txt</label> <span class="status"></span></li>
+    </ul>
     <p id="error" role="alert" hidden></p>
-    <p id="done" hidden>Ваш файл готов <a id="download" class="button" download="llms.txt">Скачать</a></p>
+    <p id="done" hidden><span id="done-text"></span> <a id="download" class="button">Скачать</a></p>
   </form>
 
   <script src="/static/app.js"></script>

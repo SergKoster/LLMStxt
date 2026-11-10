@@ -4,6 +4,7 @@
   --bg: #f9fafb;
   --text: #1f2937;
   --border: #cbd5e1;
+  --muted: #64748b;
   --error-text: #b91c1c;
 }
 
@@ -68,6 +69,11 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 }
 .spinner[hidden] { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+#files { flex-basis: 100%; margin: 4px 0 0; padding: 0; list-style: none; }
+#files li { padding: 2px 0; }
+#files input { flex: none; margin: 0 6px 0 0; accent-color: var(--accent); }
+#files .status { margin-left: 8px; color: var(--muted); }
 
 #error { flex-basis: 100%; margin: 0; color: var(--error-text); }
 #done { flex-basis: 100%; margin: 8px 0 0; }

@@ -18,6 +18,17 @@ def test_only_files_older_than_an_hour_are_removed(tmp_path):
     assert fresh.exists()
 
 
+def test_forgotten_work_folders_are_removed(tmp_path):
+    work = tmp_path / "task.work"
+    work.mkdir()
+    (work / "llms.txt").write_text("x")
+    two_hours_ago = time.time() - 2 * 3600
+    os.utime(work, (two_hours_ago, two_hours_ago))
+
+    assert remove_old_files(tmp_path, 3600) == 1
+    assert not work.exists()
+
+
 def test_missing_directory_is_fine(tmp_path):
     assert remove_old_files(tmp_path / "nope", 3600) == 0
 

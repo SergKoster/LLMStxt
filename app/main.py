@@ -34,6 +34,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 class GenerateRequest(BaseModel):
     url: str
+    files: list[str] = [config.LLMS_FILE]  # что генерировать; по умолчанию — как в задании
 
 
 def _error(status_code: int, text: str) -> JSONResponse:
@@ -52,12 +53,17 @@ def start_generation(body: GenerateRequest, background: BackgroundTasks):
     except UrlError as exc:
         return _error(422, str(exc))
 
+    # Убираем повторы и приводим к одному порядку
+    files = [name for name in config.AVAILABLE_FILES if name in body.files]
+    if not files or set(body.files) - set(config.AVAILABLE_FILES):
+        return _error(422, "Выберите, что сгенерировать.")
+
     try:
         task_id = tasks.create_task()
     except tasks.TooManyTasks:
         return _error(429, "Сервис сейчас занят. Попробуйте через минуту.")
 
-    background.add_task(tasks.run_task, task_id, url)
+    background.add_task(tasks.run_task, task_id, url, files)
     return {"task_id": task_id, "status": tasks.PROCESSING}
 
 
@@ -75,7 +81,9 @@ def get_status(task_id: str):
         return {"status": tasks.ERROR, "error": task.error}
 
     # Задача готова — либо сервис перезапускался, а файл на диске остался.
-    path = tasks.output_path(task_id)
-    if path.is_file():
-        return FileResponse(path, media_type="text/plain; charset=utf-8", filename="llms.txt")
+    result = tasks.find_result(task_id)
+    if result:
+        path, download_name = result
+        media_type = "application/zip" if path.suffix == ".zip" else "text/plain; charset=utf-8"
+        return FileResponse(path, media_type=media_type, filename=download_name)
     return _error(404, "Задача не найдена или файл уже удалён. Сгенерируйте заново.")

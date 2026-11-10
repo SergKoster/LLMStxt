@@ -56,8 +56,8 @@ def pick_max_pages(crawl_delay: float) -> int:
     return max(config.MIN_PAGES, min(config.MAX_PAGES, pages))
 
 
-def build_command(url: str, output: Path, max_pages: int) -> list[str]:
-    return [
+def build_command(url: str, output: Path, max_pages: int, full: bool = False) -> list[str]:
+    command = [
         find_llms_gen(),
         url,
         "--depth", str(config.CRAWL_DEPTH),
@@ -67,6 +67,9 @@ def build_command(url: str, output: Path, max_pages: int) -> list[str]:
         "--delay", str(config.REQUEST_DELAY_SECONDS),
         "--timeout", str(config.REQUEST_TIMEOUT_SECONDS),
     ]
+    if full:
+        command.append("--full")  # llms-gen положит llms-full.txt рядом с основным файлом
+    return command
 
 
 def fix_broken_entries(text: str) -> str:
@@ -92,11 +95,18 @@ def fix_broken_entries(text: str) -> str:
     return "\n".join(result) + "\n"
 
 
-def generate(url: str, output: Path) -> None:
-    """Создаёт llms.txt по адресу output или бросает GenerationError."""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    part = output.with_name(output.name + ".part")  # чтобы не отдать недописанный файл
-    command = build_command(url, part, pick_max_pages(read_crawl_delay(url)))
+def generate(url: str, work_dir: Path, full: bool = False) -> dict[str, Path]:
+    """Создаёт в папке work_dir файл llms.txt и, если full, ещё llms-full.txt.
+
+    Возвращает {имя файла: путь}. При неудаче бросает GenerationError;
+    папку work_dir убирает тот, кто вызвал.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    produced = {config.LLMS_FILE: work_dir / config.LLMS_FILE}
+    if full:
+        produced[config.FULL_FILE] = work_dir / config.FULL_FILE
+    max_pages = pick_max_pages(read_crawl_delay(url))
+    command = build_command(url, produced[config.LLMS_FILE], max_pages, full)
 
     try:
         result = subprocess.run(
@@ -109,7 +119,6 @@ def generate(url: str, output: Path) -> None:
             env={**os.environ, "PYTHONUTF8": "1"},
         )
     except subprocess.TimeoutExpired:
-        part.unlink(missing_ok=True)
         raise GenerationError(
             f"Не уложились в {config.GENERATION_TIMEOUT_SECONDS} секунд: "
             "сайт слишком большой или отвечает слишком медленно."
@@ -118,8 +127,8 @@ def generate(url: str, output: Path) -> None:
         log.error("Не удалось запустить llms-gen: %s", exc)
         raise GenerationError("Генератор недоступен. Попробуйте позже.") from None
 
-    if result.returncode != 0 or not part.exists() or part.stat().st_size == 0:
-        part.unlink(missing_ok=True)
+    missing = [name for name, path in produced.items() if not path.exists() or path.stat().st_size == 0]
+    if result.returncode != 0 or missing:
         log.warning("llms-gen завершился с кодом %s для %s: %s", result.returncode, url, result.stderr[-500:])
         if "No pages found" in result.stderr:
             raise GenerationError(
@@ -128,5 +137,6 @@ def generate(url: str, output: Path) -> None:
             )
         raise GenerationError("Не удалось сгенерировать файл для этого сайта.")
 
-    part.write_text(fix_broken_entries(part.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
-    os.replace(part, output)
+    for path in produced.values():
+        path.write_text(fix_broken_entries(path.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
+    return produced
