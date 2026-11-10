@@ -1,0 +1,3 @@
+fastapi==0.162.2
+uvicorn[standard]==0.54.0
+llms-generator==0.3.2

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Генератор llms.txt</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <form id="form" novalidate>
+    <input id="url" name="url" type="url" inputmode="url" autocomplete="url" maxlength="2000"
+           aria-label="URL сайта" required>
+    <button id="submit" type="submit">Сгенерировать</button>
+    <span id="loading" class="spinner" role="status" aria-label="Загрузка" hidden></span>
+    <p id="error" role="alert" hidden></p>
+  </form>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
