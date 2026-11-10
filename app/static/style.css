@@ -43,7 +43,7 @@ input {
 }
 input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-button {
+button, .button {
   padding: 12px 20px;
   font: inherit;
   font-weight: 600;
@@ -53,7 +53,8 @@ button {
   border-radius: 8px;
   cursor: pointer;
 }
-button:hover { background: var(--accent-dark); }
+button:hover, .button:hover { background: var(--accent-dark); }
+.button { display: inline-block; margin-left: 12px; text-decoration: none; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .spinner {
@@ -69,3 +70,4 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 #error { flex-basis: 100%; margin: 0; color: var(--error-text); }
+#done { flex-basis: 100%; margin: 8px 0 0; }

@@ -5,11 +5,16 @@ const input = document.getElementById("url");
 const button = document.getElementById("submit");
 const loading = document.getElementById("loading");
 const errorBox = document.getElementById("error");
+const doneBox = document.getElementById("done");
+const downloadLink = document.getElementById("download");
 
-// state: "idle" | "loading" | "error"
+let fileUrl = null;
+
+// state: "idle" | "loading" | "error" | "done"
 function show(state, text) {
   loading.hidden = state !== "loading";
   errorBox.hidden = state !== "error";
+  doneBox.hidden = state !== "done";
   errorBox.textContent = state === "error" ? text : "";
   button.disabled = state === "loading";
   input.disabled = state === "loading";
@@ -33,12 +38,10 @@ function errorText(data) {
 }
 
 function saveFile(blob) {
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "llms.txt";
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  show("idle");
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = URL.createObjectURL(blob);
+  downloadLink.href = fileUrl;
+  show("done");
 }
 
 async function poll(taskId) {
