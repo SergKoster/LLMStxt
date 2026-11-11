@@ -9,7 +9,7 @@ LLMS_BYTES = b"# Example\n"
 FULL_BYTES = b"# Example\n\nFull text.\n"
 
 
-def fake_generate(url, work_dir, full=False):
+def fake_generate(url, work_dir, full=False, guess_scheme=False):
     """Подмена генератора: кладёт файлы в рабочую папку, как настоящий."""
     work_dir.mkdir(parents=True)
     produced = {"llms.txt": work_dir / "llms.txt"}
@@ -81,7 +81,7 @@ def test_status_processing(client):
 
 
 def test_status_error_has_text(client, monkeypatch):
-    def failing(url, work_dir, full=False):
+    def failing(url, work_dir, full=False, guess_scheme=False):
         raise GenerationError("Сайт не отвечает.")
 
     monkeypatch.setattr(tasks, "generate", failing)
@@ -92,7 +92,7 @@ def test_status_error_has_text(client, monkeypatch):
 
 
 def test_unexpected_crash_becomes_error_not_500(client, monkeypatch):
-    def crashing(url, work_dir, full=False):
+    def crashing(url, work_dir, full=False, guess_scheme=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(tasks, "generate", crashing)
@@ -109,10 +109,17 @@ def test_nonexistent_site_is_clear_error(client):
     assert "Сайт не найден" in response.json()["error"]
 
 
-def test_url_without_http_is_rejected(client):
-    response = client.post("/generate", json={"url": "example.com"})
-    assert response.status_code == 422
-    assert "http" in response.json()["error"]
+def test_url_without_scheme_is_accepted_and_guessed(client, monkeypatch):
+    calls = []
+
+    def generate(url, work_dir, full=False, guess_scheme=False):
+        calls.append((url, guess_scheme))
+        return fake_generate(url, work_dir, full)
+
+    monkeypatch.setattr(tasks, "generate", generate)
+    assert client.post("/generate", json={"url": "example.com"}).status_code == 200
+    assert client.post("/generate", json={"url": "http://example.com"}).status_code == 200
+    assert calls == [("https://example.com", True), ("http://example.com", False)]
 
 
 def test_unknown_task(client):

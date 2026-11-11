@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from app import config, tasks
 from app.cleanup import cleanup_loop
-from app.validation import UrlError, validate_url
+from app.validation import UrlError, scheme_given, validate_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -63,7 +63,7 @@ def start_generation(body: GenerateRequest, background: BackgroundTasks):
     except tasks.TooManyTasks:
         return _error(429, "Сервис сейчас занят. Попробуйте через минуту.")
 
-    background.add_task(tasks.run_task, task_id, url, files)
+    background.add_task(tasks.run_task, task_id, url, files, not scheme_given(body.url))
     return {"task_id": task_id, "status": tasks.PROCESSING}
 
 

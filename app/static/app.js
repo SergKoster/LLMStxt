@@ -41,9 +41,11 @@ function show(state, text) {
 
 function checkUrl(value) {
   if (!value) return "Введите адрес сайта.";
-  if (!/^https?:\/\//i.test(value)) return "Адрес должен начинаться с http:// или https://";
+  // Без схемы можно: сервер сам подставит https:// или http://
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+  if (hasScheme && !/^https?:\/\//i.test(value)) return "Адрес должен начинаться с http:// или https://";
   try {
-    const host = new URL(value).hostname;
+    const host = new URL(hasScheme ? value : `https://${value}`).hostname;
     if (!host.includes(".")) return "Адрес записан с ошибкой.";
   } catch {
     return "Адрес записан с ошибкой.";

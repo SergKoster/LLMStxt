@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, generator
+from app import config, generator, probe
 from app.generator import GenerationError, build_command, generate, pick_max_pages
 
 SITE_BYTES = b"# Site\n"
@@ -54,6 +54,33 @@ def fake_run(returncode=0, stderr="", content=SITE_BYTES):
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     monkeypatch.setattr(generator, "read_crawl_delay", lambda url: 0.0)
+    monkeypatch.setattr(probe, "diagnose", lambda url: None)
+
+
+def test_generate_no_pages_names_the_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", fake_run(1, "ERROR: No pages found. Check the URL and try again.", None))
+    monkeypatch.setattr(probe, "diagnose", lambda url: probe.BLOCKED)
+    with pytest.raises(GenerationError, match="защищён от автоматических программ"):
+        generate("https://example.com", tmp_path / "work")
+
+
+def test_guessed_scheme_is_used_for_crawl(tmp_path, monkeypatch):
+    seen = []
+
+    def run(command, **kwargs):
+        seen.append(command[1])
+        return fake_run()(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(probe, "pick_scheme", lambda url: "http://example.com")
+    generate("https://example.com", tmp_path / "work", guess_scheme=True)
+    assert seen == ["http://example.com"]
+
+
+def test_site_opens_by_no_scheme(tmp_path, monkeypatch):
+    monkeypatch.setattr(probe, "pick_scheme", lambda url: None)
+    with pytest.raises(GenerationError, match="ни по https://, ни по http://"):
+        generate("https://example.com", tmp_path / "work", guess_scheme=True)
 
 
 def test_generate_writes_llms_txt(tmp_path, monkeypatch):

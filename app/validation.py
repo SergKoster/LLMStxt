@@ -1,10 +1,13 @@
 """Проверка URL, который прислал пользователь."""
 
 import ipaddress
+import re
 import socket
 from urllib.parse import urlparse
 
 from app import config
+
+_SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 
 class UrlError(ValueError):
@@ -16,11 +19,32 @@ def _is_public_ip(address: str) -> bool:
     return ip.is_global and not ip.is_multicast
 
 
+def check_public_host(host: str, port: int | None) -> None:
+    """Хост существует и смотрит в интернет, а не во внутреннюю сеть сервера. Иначе UrlError."""
+    try:
+        infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError):
+        raise UrlError("Сайт не найден. Проверьте, нет ли опечатки в адресе.") from None
+    if not infos or not all(_is_public_ip(info[4][0]) for info in infos):
+        raise UrlError("Этот адрес недоступен для генерации.")
+
+
+def scheme_given(raw: str) -> bool:
+    """Пользователь сам написал схему (`https://`, `http://` или любую другую)."""
+    return bool(_SCHEME.match((raw or "").strip()))
+
+
 def validate_url(raw: str) -> str:
-    """Возвращает очищенный URL или бросает UrlError с понятным текстом."""
+    """Возвращает очищенный URL или бросает UrlError с понятным текстом.
+
+    Адрес без схемы (`priisk.pro`) получает `https://`; какую схему брать на самом деле,
+    решает generator перед обходом.
+    """
     url = (raw or "").strip()
     if not url:
         raise UrlError("Введите адрес сайта.")
+    if not scheme_given(url):
+        url = f"https://{url}"
     if len(url) > config.MAX_URL_LENGTH:
         raise UrlError("Адрес слишком длинный.")
     if not url.lower().startswith(("http://", "https://")):
@@ -35,13 +59,6 @@ def validate_url(raw: str) -> str:
     if not host or any(ch.isspace() for ch in url):
         raise UrlError("Адрес записан с ошибкой.")
 
-    try:
-        infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
-    except (socket.gaierror, UnicodeError):
-        raise UrlError("Сайт не найден. Проверьте, нет ли опечатки в адресе.") from None
-
     # Не даём ходить через сервис во внутреннюю сеть сервера.
-    if not infos or not all(_is_public_ip(info[4][0]) for info in infos):
-        raise UrlError("Этот адрес недоступен для генерации.")
-
+    check_public_host(host, port)
     return url

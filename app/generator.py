@@ -10,7 +10,7 @@ import urllib.robotparser
 from pathlib import Path
 from urllib.parse import urljoin
 
-from app import config
+from app import config, probe
 
 log = logging.getLogger("llms.generator")
 
@@ -95,12 +95,17 @@ def fix_broken_entries(text: str) -> str:
     return "\n".join(result) + "\n"
 
 
-def generate(url: str, work_dir: Path, full: bool = False) -> dict[str, Path]:
+def generate(url: str, work_dir: Path, full: bool = False, guess_scheme: bool = False) -> dict[str, Path]:
     """Создаёт в папке work_dir файл llms.txt и, если full, ещё llms-full.txt.
 
+    guess_scheme — схему в url подставили мы, а не пользователь: сначала пробуем https, потом http.
     Возвращает {имя файла: путь}. При неудаче бросает GenerationError;
     папку work_dir убирает тот, кто вызвал.
     """
+    if guess_scheme:
+        url = probe.pick_scheme(url)
+        if url is None:
+            raise GenerationError(probe.NO_SCHEME)
     work_dir.mkdir(parents=True, exist_ok=True)
     produced = {config.LLMS_FILE: work_dir / config.LLMS_FILE}
     if full:
@@ -131,8 +136,10 @@ def generate(url: str, work_dir: Path, full: bool = False) -> dict[str, Path]:
     if result.returncode != 0 or missing:
         log.warning("llms-gen завершился с кодом %s для %s: %s", result.returncode, url, result.stderr[-500:])
         if "No pages found" in result.stderr:
+            # Только сейчас, после неудачи, спрашиваем сайт сами, чтобы назвать причину.
             raise GenerationError(
-                "Не удалось прочитать страницы сайта. Возможно, сайт недоступен, "
+                probe.diagnose(url)
+                or "Не удалось прочитать страницы сайта. Возможно, сайт недоступен, "
                 "запрещает обход или адрес указан неверно."
             )
         raise GenerationError("Не удалось сгенерировать файл для этого сайта.")

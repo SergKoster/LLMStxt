@@ -90,12 +90,12 @@ def _finish(task_id: str, status: str, error: str = "") -> None:
             task.error = error
 
 
-def run_task(task_id: str, url: str, files: list[str]) -> None:
+def run_task(task_id: str, url: str, files: list[str], guess_scheme: bool = False) -> None:
     """Фоновая функция: запускается через BackgroundTasks в отдельном потоке."""
     work_dir = config.OUTPUT_DIR / f"{task_id}.work"
     with _slots:
         try:
-            produced = generate(url, work_dir, full=config.FULL_FILE in files)
+            produced = generate(url, work_dir, full=config.FULL_FILE in files, guess_scheme=guess_scheme)
             _pack(task_id, produced, files)
         except GenerationError as exc:
             _finish(task_id, ERROR, str(exc))
