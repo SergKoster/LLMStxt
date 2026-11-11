@@ -1,4 +1,5 @@
 import io
+import re
 import uuid
 import zipfile
 
@@ -31,6 +32,14 @@ def test_index_page(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Сгенерировать" in response.text
+
+
+def test_static_links_carry_version_so_browser_skips_old_cache(client):
+    response = client.get("/")
+    assert response.headers["cache-control"] == "no-cache"
+    assert re.search(r'/static/app\.js\?v=[0-9a-f]{10}"', response.text)
+    assert re.search(r'/static/style\.css\?v=[0-9a-f]{10}"', response.text)
+    assert client.get(re.search(r'/static/app\.js\?v=\w+', response.text).group()).status_code == 200
 
 
 def test_generate_then_download(client, monkeypatch):

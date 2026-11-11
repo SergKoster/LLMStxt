@@ -1,13 +1,14 @@
 """FastAPI-приложение: страница, POST /generate, GET /status/{task_id}."""
 
 import asyncio
+import hashlib
 import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -41,9 +42,25 @@ def _error(status_code: int, text: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"status": "error", "error": text})
 
 
+def _index_with_versions() -> str:
+    """index.html, где к ссылкам на app.js и style.css дописан отпечаток их содержимого.
+
+    Файл поменялся — поменялась ссылка, и браузер не возьмёт старую версию из кэша.
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for name in ("app.js", "style.css"):
+        digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={digest}")
+    return html
+
+
+INDEX_HTML = _index_with_versions()  # статика меняется только с перезапуском сервиса
+
+
 @app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def index() -> HTMLResponse:
+    # no-cache: саму страницу браузер каждый раз сверяет с сервером, иначе не увидит новые ссылки
+    return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/generate")
