@@ -108,3 +108,57 @@ https://www.optimizely.com/field-notes/articles/does-llms-txt-work/
 Источники: https://blog.cloudflare.com/content-signals-policy/ ·
 https://www.searchenginejournal.com/ai-crawler-user-agents-list/ ·
 https://www.layer3labs.io/comparisons/llms-txt-generators
+
+## 4. Простые проверки сайта для шага «анализ» (2026-11-12)
+
+Вопрос владельца: что плохое или недоделанное на сайте видно сразу, без нейросети. Ресёрч делал
+агент (Sonnet) по открытым источникам. Частоту проблем у маленьких сайтов он оценил сам —
+статистики не нашёл.
+
+Ограничения: только сырой HTML, заголовки ответа и несколько запросов, без браузера и JS.
+Принцип показа: только то, что ведёт к одному из итогов «сайт не виден», «сайт сломан»,
+«в выдаче будет пусто». Нет проблем — «серьёзных проблем не найдено», мелочи не искать.
+
+**Кандидаты в первый вариант (рекомендация агента):**
+
+| # | Проверка | Как проверить | Почему важно | Исправление |
+|---|---|---|---|---|
+| 1 | Сайт закрыт от индексации | `<meta name=robots content=noindex>`, заголовок `X-Robots-Tag: noindex`, `Disallow: /` в `robots.txt` для `*`, Googlebot, YandexBot | Сайт совсем не попадёт в поиск. Частый хвост тестовой версии и галочки WordPress | Совет, где снять |
+| 2 | Сайт отвечает ошибками | Нет HTTPS / сертификат просрочен; страницы из обхода с 4xx/5xx | Браузер пишет «Небезопасно», посетитель упирается в ошибку | Совет; список битых ссылок |
+| 3 | ИИ-боты для поиска закрыты | `robots.txt`: OAI-SearchBot, PerplexityBot, Claude-SearchBot (и отдельно обучающие GPTBot, ClaudeBot, Google-Extended, CCBot) | По документации OpenAI без OAI-SearchBot сайта нет в поиске ChatGPT | Готовый блок для `robots.txt` |
+| 4 | Защита хостинга/CDN режет ботов | 403/429/страница проверки на наш запрос, хотя `robots.txt` разрешает | Боты не видят сайт, хотя владелец «всё открыл» | Совет |
+| 5 | Главная пустая без JS | Видимого текста в сыром HTML < ~200 символов, есть `<div id="root">` / `__next` | Большинство ИИ-ботов не выполняют JS (вторичные источники) | Совет |
+| 6 | Нет `<meta name=viewport>` | Тег в `<head>` | На телефоне сайт мелкий; Яндекс пишет «не оптимизирован для мобильных» | Готовая строка |
+| 7 | Нет `title`/`description` или одинаковые на страницах | Теги на страницах из обхода | Это заголовок и подпись в выдаче; есть в Яндекс.Вебмастере и Lighthouse | Совет, одним пунктом |
+| 8 | Несуществующий адрес отдаёт 200 вместо 404 | `GET /случайная-строка` | Есть в диагностике Яндекса; владелец сам не увидит | Совет |
+
+В запасе (показывать только при явной ошибке): нет 301 на один адрес из http/https/www;
+`canonical` на чужой или тестовый домен; `robots.txt` отдаётся через редирект (Яндекс его тогда
+не учитывает); `sitemap.xml` — только сайтам больше ~5 страниц (можем сгенерировать сами).
+
+**Не показывать:** длину title/description (Google: рекомендаций по длине нет), число слов,
+meta keywords, структуру h1–h6, alt у всех картинок, скорость (без браузера — гадание),
+Schema.org «для ИИ» и «GEO-баллы» (Google: специальная разметка для AI Overviews не нужна),
+nofollow, hreflang, `Clean-param`, `Host`, `Crawl-delay`. Open Graph, `lang`, favicon — мелочи,
+не в первом списке.
+
+**Про ИИ-видимость честно.** Подтверждено документацией: у OpenAI разные боты для поиска
+(OAI-SearchBot) и обучения (GPTBot) — обучение можно закрыть без потери поиска; Google для
+AI Overviews ничего особого не требует, нужна обычная индексация и текст в HTML. Не подтверждено:
+что `llms.txt` повышает цитируемость.
+
+**Замечания агента-исполнителя (не из ресёрча):**
+- Проверка 3 даёт готовый блок `robots.txt` — владелец ранее решил `robots.txt` пока не делать.
+- Проверку 4 ресёрч предлагал делать запросами с чужим User-Agent (Googlebot, YandexBot). Это
+  выдача себя за чужого бота, а крупные сайты проверяют настоящий Googlebot по DNS и всё равно
+  ответят иначе. Предлагаю проверять только своим User-Agent — то же, что уже делает `probe.py`.
+- Проверки 2, 4, 5 частично уже есть в `probe.py` (тексты ошибок обхода).
+
+Источники: https://developers.openai.com/api/docs/bots ·
+https://developers.google.com/search/docs/appearance/ai-features ·
+https://yandex.ru/support/webmaster/diagnosis/possible.html ·
+https://yandex.ru/support/webmaster/ru/error-dictionary/robots-txt ·
+https://www.debugbear.com/blog/lighthouse-seo-score ·
+https://www.searchenginejournal.com/what-is-the-best-title-tag-length-for-seo ·
+https://www.seroundtable.com/google-word-count-for-seo-google-rankings-35607.html ·
+https://dev.to/orzmar/your-robotstxt-says-gptbot-is-welcome-your-server-says-403-9f2
