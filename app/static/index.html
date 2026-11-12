@@ -8,9 +8,14 @@
 </head>
 <body>
   <main>
+    <header>
+      <h1>Генератор</h1>
+      <p class="lead">Проверка вашего сайта на недоработки</p>
+    </header>
+    <label for="url" class="url-label">Введите URL своего сайта:</label>
     <form id="analyze-form" class="row" novalidate>
       <input id="url" name="url" type="url" inputmode="url" autocomplete="url" maxlength="2000"
-             aria-label="URL сайта" required>
+             placeholder="например, mysite.ru" required>
       <button id="analyze" type="submit">Проанализировать</button>
       <span id="analyze-loading" class="spinner" role="status" aria-label="Загрузка" hidden></span>
     </form>

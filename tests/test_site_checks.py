@@ -128,6 +128,33 @@ def test_closed_from_search(head, headers, robots):
     assert advice and advice.title == "Сайт закрыт от поисковиков"
 
 
+@pytest.mark.parametrize(
+    "robots",
+    [
+        # Как у lenta.ru: «Disallow: /?» закрывает только адреса с параметрами, не весь сайт
+        "User-agent: Yandex\nDisallow: /search\nDisallow: /?\nDisallow: */amp$\n\nUser-agent: *\nDisallow: /?\n",
+        # Как у gosuslugi.ru: главная разрешена отдельным правилом «Allow: /$»
+        "User-agent: *\nAllow: /$\nDisallow: /\n",
+        # Пустой Disallow ничего не запрещает
+        "User-agent: *\nDisallow:\n",
+        # Запрет только для другого робота
+        "User-agent: BadBot\nDisallow: /\n",
+    ],
+)
+def test_robots_that_do_not_close_the_site(robots):
+    assert site_checks.check_closed_from_search(page(), {}, robots) is None
+
+
+def test_robots_longest_rule_wins():
+    groups = site_checks.parse_robots("User-agent: *\nDisallow: /\nAllow: /public\n")
+    assert site_checks.robots_allows(groups, ("*",), "/public/page")
+    assert not site_checks.robots_allows(groups, ("*",), "/private")
+    # Группа робота с несколькими User-agent подряд
+    groups = site_checks.parse_robots("User-agent: Googlebot\nUser-agent: Yandex\nDisallow: /\n")
+    assert not site_checks.robots_allows(groups, ("yandexbot", "yandex"), "/")
+    assert site_checks.robots_allows(groups, ("*",), "/")
+
+
 def test_https_problems():
     assert site_checks.check_https("none")
     assert site_checks.check_https("bad_certificate")

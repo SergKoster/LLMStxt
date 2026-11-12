@@ -5,7 +5,6 @@
 """
 
 import re
-import urllib.robotparser
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -23,8 +22,8 @@ _FILE_EXTENSIONS = (
     ".txt", ".json", ".css", ".js", ".exe", ".apk", ".dmg",
 )
 
-# Роботы, для которых проверяем запрет в robots.txt
-_SEARCH_ROBOTS = ("*", "Googlebot", "YandexBot")
+# Роботы, для которых проверяем запрет в robots.txt: имена, по которым робот ищет свою группу
+_SEARCH_ROBOTS = (("*",), ("googlebot",), ("yandexbot", "yandex"))
 
 
 @dataclass
@@ -197,6 +196,57 @@ def _forbids_index(robots_content: str) -> bool:
     return bool(words & {"noindex", "none"})
 
 
+def parse_robots(text: str) -> dict[str, list[tuple[bool, str]]]:
+    """robots.txt → {имя робота в нижнем регистре: [(разрешено?, шаблон пути)]}.
+
+    Свой разбор вместо urllib.robotparser: тот не понимает `*` и `$` в путях и считает
+    `Disallow: /?` запретом всего сайта (так ложно «закрывались» lenta.ru и gosuslugi.ru).
+    """
+    groups: dict[str, list[tuple[bool, str]]] = {}
+    agents: list[str] = []
+    rules_started = False
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if ":" not in line:
+            continue
+        key, value = (part.strip() for part in line.split(":", 1))
+        key = key.lower()
+        if key == "user-agent":
+            if rules_started:  # после правил начинается новая группа
+                agents, rules_started = [], False
+            agents.append(value.lower())
+            groups.setdefault(value.lower(), [])
+        elif key in ("allow", "disallow") and agents:
+            rules_started = True
+            for agent in agents:
+                groups[agent].append((key == "allow", value))
+    return groups
+
+
+def _rule_matches(pattern: str, path: str) -> bool:
+    regex = re.escape(pattern).replace(r"\*", ".*")
+    if regex.endswith(r"\$"):
+        regex = regex[:-2] + "$"
+    return re.match(regex, path) is not None
+
+
+def robots_allows(groups: dict[str, list[tuple[bool, str]]], names: tuple[str, ...], path: str) -> bool:
+    """Пускает ли robots.txt робота на path — по правилам Google и Яндекса.
+
+    Берётся группа с именем робота, иначе `*`. Из подходящих правил побеждает самое длинное,
+    при равной длине — Allow. Пустой `Disallow:` ничего не запрещает.
+    """
+    rules = next((groups[name] for name in names if name in groups), groups.get("*", []))
+    best: tuple[int, bool] | None = None
+    for allow, pattern in rules:
+        if not pattern or not _rule_matches(pattern, path):
+            continue
+        candidate = (len(pattern), allow)
+        if best is None or candidate > best:  # длиннее, а при равенстве True (Allow) больше False
+            best = candidate
+    return best is None or best[1]
+
+
 def check_closed_from_search(main: Page, headers: dict[str, str], robots_txt: str | None) -> Advice | None:
     """1. Сайт закрыт от поисковиков: noindex на главной или Disallow: / в robots.txt."""
     details = []
@@ -212,10 +262,8 @@ def check_closed_from_search(main: Page, headers: dict[str, str], robots_txt: st
             "Уберите его в настройках хостинга или попросите разработчика."
         )
     if robots_txt is not None:
-        parser = urllib.robotparser.RobotFileParser()
-        parser.parse(robots_txt.splitlines())
-        root = urljoin(main.url, "/")
-        blocked = [robot for robot in _SEARCH_ROBOTS if not parser.can_fetch(robot, root)]
+        groups = parse_robots(robots_txt)
+        blocked = [names for names in _SEARCH_ROBOTS if not robots_allows(groups, names, "/")]
         if blocked:
             details.append(
                 "Файл robots.txt запрещает поисковикам обходить сайт (строка «Disallow: /»). "
