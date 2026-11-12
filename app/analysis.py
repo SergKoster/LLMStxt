@@ -180,7 +180,8 @@ def _analyze(url: str, guess_scheme: bool) -> dict:
         site_checks.check_https(https.result()),
         site_checks.check_broken_pages(other_pages),
         site_checks.check_empty_without_js(main_answer.body),
-        site_checks.check_viewport(main),
+        # check_viewport (проверка 6) временно отключена по решению владельца (2026-11-12):
+        # сайты с отдельной страницей для телефонов (lenta.ru) получали ложный совет.
         site_checks.check_titles(all_pages),
         site_checks.check_not_found(missing_status),
     ]

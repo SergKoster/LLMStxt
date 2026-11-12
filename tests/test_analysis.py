@@ -120,7 +120,6 @@ def test_problems_become_advice(network):
         "Сайт не открывается по защищённому адресу https://",
         "Часть страниц открывается с ошибкой",
         "Без скриптов на главной странице почти нет текста",
-        "Сайт не настроен для телефонов",
         "Нет заголовка или описания для поиска",
         "Несуществующие страницы не отвечают ошибкой 404",
     }
@@ -191,3 +190,12 @@ def test_big_llms_txt_cut_mid_line_is_still_standard(network, monkeypatch):
     body = b"# Example\n## Docs\n- [A](https://example.com/a)\n- [B](https://exam"[:40]
     network.update(site(**{"https://example.com/llms.txt": text_file("https://example.com/llms.txt", body)}))
     assert not files_of(analysis.analyze("https://example.com/"))["llms.txt"]["recommended"]
+
+
+def test_viewport_advice_is_switched_off(network):
+    # Решение владельца 2026-11-12: совет «не настроен для телефонов» пока не показываем
+    network["https://example.com/"] = Response(
+        200, "text/html", f"<html><head><title>T</title><meta name='description' content='d'></head>"
+        f"<body>{TEXT}</body></html>".encode(), {}, "https://example.com/",
+    )
+    assert analysis.analyze("https://example.com/")["advice"] == []
