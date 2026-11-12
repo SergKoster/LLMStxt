@@ -152,38 +152,41 @@ def internal_links(page: Page, limit: int) -> list[str]:
     return result
 
 
-# --- Формат llms.txt (правила — docs/RESEARCH.md, раздел 2) ---
+# --- Формат llms.txt (правила — docs/RESEARCH.md, раздел 2; смягчены по решению владельца 2026-11-12) ---
 
-_LINK_ITEM = re.compile(r"^[-*] \[[^\]]+\]\((https?://[^\s)]+)\)(:.*)?$")
+# Начало пункта со ссылкой. Что после ссылки (`: описание`, ` - описание`) — не проверяем.
+_LINK_ITEM = re.compile(r"^[-*] \[[^\]]+\]\(https?://[^\s)]+\)")
 
 
 def llms_txt_is_standard(body: bytes) -> bool:
-    """Файл сделан по стандарту llmstxt.org."""
+    """Файл сделан по стандарту llmstxt.org — проверяем только основу.
+
+    UTF-8; первая строка — заголовок `# `, и он единственный; пункт списка, который начинается
+    со ссылки (`- [`), начинается с правильной ссылки `- [текст](http(s)://…)`.
+    Подзаголовки `###` и пункты без ссылки разрешены: так пишут хорошие ручные файлы
+    (react.dev, docs.stripe.com). Строки внутри блоков кода ``` не проверяются.
+    """
     try:
-        text = body.decode("utf-8").lstrip("﻿")
+        text = body.decode("utf-8").lstrip("﻿")  # BOM в начале файла
     except UnicodeDecodeError:
         return False
-    lines = [line.rstrip() for line in text.splitlines()]
-    meaningful = [line for line in lines if line.strip()]
+    meaningful = []
+    in_code = False
+    for line in text.splitlines():
+        line = line.rstrip()
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+            continue
+        if line.strip() and not in_code:
+            meaningful.append(line)
     if not meaningful or not meaningful[0].startswith("# "):
         return False
-    headings = [line for line in meaningful if line.startswith("#")]
-    if sum(1 for line in headings if line.startswith("# ")) != 1:
+    if sum(1 for line in meaningful if line.startswith("# ")) != 1:
         return False
-    if any(not line.startswith(("# ", "## ")) for line in headings):
-        return False  # заголовки глубже ## или без пробела
-
-    links = []
-    in_section = False
     for line in meaningful:
-        if line.startswith("## "):
-            in_section = True
-        elif in_section and line.startswith(("- ", "* ")):
-            match = _LINK_ITEM.match(line)
-            if not match:
-                return False
-            links.append(match.group(1))
-    return len(links) == len(set(links))
+        if line.startswith(("- [", "* [")) and not _LINK_ITEM.match(line):
+            return False
+    return True
 
 
 # --- Советы по сайту (проверки 1, 2, 5, 6, 7, 8 из docs/RESEARCH.md, раздел 4) ---

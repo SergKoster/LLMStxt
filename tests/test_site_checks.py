@@ -71,6 +71,12 @@ Some text.
         STANDARD,
         "﻿# Сайт\n\n## Раздел\n\n- [Страница](https://example.com/a)\n".encode(),
         b"# Only title\n",
+        # Смягчённое правило (решение владельца 2026-11-12): так пишут хорошие ручные файлы
+        b"# T\n## S\n### Deep\n- [A](https://e.com/a)\n",  # подзаголовок глубже ##
+        b"# T\n## S\n- just text\n- The [API](https://e.com/api) for payments\n",  # пункты без ссылки в начале
+        b"# T\n## S\n- [A](https://e.com/a)\n- [B](https://e.com/a)\n",  # повтор ссылки
+        b"# T\n```\n# comment in code\n```\n",  # # внутри блока кода — не заголовок
+        b"# T\n## S\n- [A](https://e.com/a) - description\n",  # описание через « - », а не «:»
     ],
 )
 def test_standard_llms_txt(body):
@@ -83,10 +89,8 @@ def test_standard_llms_txt(body):
         b"",
         b"Some text\n# Title\n",  # заголовок не первый
         b"# One\n# Two\n",  # два заголовка первого уровня
-        b"# T\n### Deep\n",  # заголовок глубже ##
         b"# T\n## S\n- [A](/relative)\n",  # ссылка не абсолютная
-        b"# T\n## S\n- just text\n",  # пункт без ссылки
-        b"# T\n## S\n- [A](https://e.com/a)\n- [B](https://e.com/a)\n",  # повтор ссылки
+        b"# T\n## S\n- [A](https://e.com/a\n",  # ссылка записана с ошибкой
         "# Т\n".encode("cp1251"),  # не UTF-8
     ],
 )

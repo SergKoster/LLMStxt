@@ -60,7 +60,7 @@
 | https://habr.com | 3 с | оба рекомендуем | нет описания у 6 из 10 страниц (в т.ч. на главной `/ru/feed/`) |
 | https://llmstxt.org | 2 с | `llms.txt` — «уже есть, по стандарту», `llms-full.txt` рекомендуем | нет описания у половины страниц |
 | https://example.com | 1 с | оба рекомендуем | нет описания |
-| https://svelte.dev | 3 с | `llms.txt` — «не по стандарту», `llms-full.txt` — «уже есть» | нет |
+| https://svelte.dev | 3 с | `llms.txt` — «уже есть, по стандарту» (до смягчения правила было «не по стандарту»), `llms-full.txt` — «уже есть» | нет |
 | https://quotes.toscrape.com/js/ | 3 с | оба рекомендуем | нет viewport; нет описания, одинаковые заголовки |
 | https://info.cern.ch | 1 с | оба рекомендуем | нет viewport; нет описания |
 | neverssl.com (без схемы) | — | оба рекомендуем | нет https:// (сайт нестабилен, иногда отвечает 503) |
@@ -68,7 +68,9 @@
 | https://dodopizza.ru | 1 с | ошибка «Сайт защищён от автоматических программ…» | — |
 | https://httpbin.org/status/500 | 1 с | ошибка «Сайт сейчас работает с ошибкой…» | — |
 
-Строгость правила «llms.txt по стандарту» на известных файлах: проходят llmstxt.org, supabase.com,
-developers.cloudflare.com, mintlify.com; не проходят svelte.dev (пункты списка без ссылок),
-react.dev (заголовки `###`), vercel.com (пункты без ссылок), docs.stripe.com (оба).
+Правило «llms.txt по стандарту» на известных файлах. Строгое (до 2026-11-12) не проходили
+svelte.dev, vercel.com (пункты списка без ссылок), react.dev (заголовки `###`), docs.stripe.com
+(оба), platform.claude.com (описание через « - »). После смягчения проходят все 10 файлов из
+раздела 1: llmstxt.org, svelte.dev, vercel.com, supabase.com, mintlify.com, react.dev,
+developers.cloudflare.com, docs.stripe.com, fastht.ml/docs, platform.claude.com.
 

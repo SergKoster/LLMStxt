@@ -184,3 +184,10 @@ def test_same_page_under_two_addresses_is_not_a_duplicate_title(network):
         "https://example.com/index.html": Response(200, main.content_type, main.body, {}, "https://example.com/index.html"),
     }))
     assert analysis.analyze("https://example.com/")["advice"] == []
+
+
+def test_big_llms_txt_cut_mid_line_is_still_standard(network, monkeypatch):
+    monkeypatch.setattr(probe, "MAX_BODY_BYTES", 40)
+    body = b"# Example\n## Docs\n- [A](https://example.com/a)\n- [B](https://exam"[:40]
+    network.update(site(**{"https://example.com/llms.txt": text_file("https://example.com/llms.txt", body)}))
+    assert not files_of(analysis.analyze("https://example.com/"))["llms.txt"]["recommended"]

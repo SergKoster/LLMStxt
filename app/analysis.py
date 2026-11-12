@@ -65,6 +65,9 @@ def _site_file(answer: probe.Response | Exception) -> bytes | None:
         return None
     if probe.is_html(answer):
         return None
+    if len(answer.body) >= probe.MAX_BODY_BYTES:
+        # Читаем не больше MAX_BODY_BYTES: последняя строка может быть обрезана — отбрасываем её
+        return answer.body[: answer.body.rfind(b"\n") + 1]
     return answer.body
 
 
