@@ -72,9 +72,12 @@ def test_two_files_come_as_archive(client, monkeypatch):
     assert status.headers["content-disposition"] == 'attachment; filename="llms.zip"'
     assert status.headers["content-type"] == "application/zip"
     with zipfile.ZipFile(io.BytesIO(status.content)) as archive:
-        assert archive.namelist() == ["llms.txt", "llms-full.txt"]
+        assert archive.namelist() == ["llms.txt", "llms-full.txt", config.INSTRUCTION_NAME]
         assert archive.read("llms.txt") == LLMS_BYTES
         assert archive.read("llms-full.txt") == FULL_BYTES
+        instruction = archive.read(config.INSTRUCTION_NAME).decode("utf-8")
+        for name in ("llms.txt", "llms-full.txt"):
+            assert config.FILE_ABOUT[name] in instruction
 
 
 def test_nothing_or_unknown_file_selected(client):

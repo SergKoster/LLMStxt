@@ -5,13 +5,14 @@
 
 import logging
 import socket
+import ssl
 import urllib.error
 import urllib.request
 import urllib.robotparser
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
-from app import config
+from app import config, site_checks
 from app.validation import UrlError, check_public_host
 
 log = logging.getLogger("llms.probe")
@@ -46,11 +47,17 @@ class Unusable(Exception):
     """Ответ получить нельзя по другой причине: редирект во внутреннюю сеть, ошибка TLS и т.п."""
 
 
+class BadCertificate(Unusable):
+    """Сайт отвечает по https, но его сертификат не проходит проверку."""
+
+
 @dataclass
 class Response:
     status: int
     content_type: str
     body: bytes
+    headers: dict[str, str] = field(default_factory=dict)  # имена в нижнем регистре
+    url: str = ""  # адрес после всех редиректов
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -70,18 +77,28 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_SafeRedirect)
 
 
-def fetch(url: str, user_agent: str = USER_AGENT) -> Response:
+def _headers(message) -> dict[str, str]:
+    return {name.lower(): value for name, value in message.items()} if message else {}
+
+
+def fetch(url: str, user_agent: str = USER_AGENT, timeout: float | None = None) -> Response:
     """GET-запрос. Любой HTTP-ответ (и 403, и 500) возвращается; без ответа — NoAnswer/Unusable."""
     request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+    timeout = timeout or config.REQUEST_TIMEOUT_SECONDS
     try:
-        with _opener.open(request, timeout=config.REQUEST_TIMEOUT_SECONDS) as resp:
-            return Response(resp.status, resp.headers.get("Content-Type", ""), resp.read(MAX_BODY_BYTES))
+        with _opener.open(request, timeout=timeout) as resp:
+            headers = _headers(resp.headers)
+            body = resp.read(MAX_BODY_BYTES)
+            return Response(resp.status, headers.get("content-type", ""), body, headers, resp.url)
     except urllib.error.HTTPError as exc:
         with exc:
-            return Response(exc.code, exc.headers.get("Content-Type", "") if exc.headers else "", b"")
+            headers = _headers(exc.headers)
+            return Response(exc.code, headers.get("content-type", ""), b"", headers, exc.url or url)
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, (TimeoutError, socket.timeout, ConnectionError)):
             raise NoAnswer(str(exc.reason)) from None
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise BadCertificate(str(exc.reason)) from None
         raise Unusable(str(exc.reason)) from None
     except (TimeoutError, ConnectionError) as exc:
         raise NoAnswer(str(exc)) from None
@@ -120,9 +137,26 @@ def _robots_forbid(url: str) -> bool:
     return bool(parser.entries) and not parser.can_fetch(ROBOTS_UA, url)
 
 
-def _looks_like_html(body: bytes) -> bool:
+def looks_like_html(body: bytes) -> bool:
     head = body[:512].lstrip().lower()
     return head.startswith((b"<!doctype html", b"<html")) or b"<html" in head
+
+
+def is_html(resp: Response) -> bool:
+    return "text/html" in resp.content_type.lower() or looks_like_html(resp.body)
+
+
+def text_for_status(status: int) -> str | None:
+    """Готовый текст для ответа сайта с ошибкой. 200 и непонятные коды — None."""
+    if status == 401:
+        return AUTH
+    if status in (403, 429):
+        return BLOCKED
+    if status in (404, 410):
+        return NOT_FOUND
+    if status >= 500:
+        return SERVER_ERROR
+    return None
 
 
 def diagnose(url: str) -> str | None:
@@ -135,20 +169,12 @@ def diagnose(url: str) -> str | None:
         log.info("Проверка %s не дала ответа: %s", url, exc)
         return None
 
-    if resp.status == 401:
-        return AUTH
-    if resp.status in (403, 429):
-        return BLOCKED
-    if resp.status in (404, 410):
-        return NOT_FOUND
-    if resp.status >= 500:
-        return SERVER_ERROR
     if resp.status != 200:
-        return None
-    if "text/html" not in resp.content_type.lower() and not _looks_like_html(resp.body):
+        return text_for_status(resp.status)
+    if not is_html(resp):
         return NOT_A_PAGE
     if _robots_forbid(url):
         return ROBOTS
-    if not resp.body.strip():
+    if site_checks.looks_empty(resp.body):
         return NO_TEXT
     return None

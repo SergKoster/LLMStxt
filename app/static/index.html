@@ -7,18 +7,38 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <form id="form" novalidate>
-    <input id="url" name="url" type="url" inputmode="url" autocomplete="url" maxlength="2000"
-           aria-label="URL сайта" required>
-    <button id="submit" type="submit">Сгенерировать</button>
-    <span id="loading" class="spinner" role="status" aria-label="Загрузка" hidden></span>
-    <ul id="files">
-      <li><label><input type="checkbox" name="files" value="llms.txt" checked> llms.txt</label> <span class="status"></span></li>
-      <li><label><input type="checkbox" name="files" value="llms-full.txt"> llms-full.txt</label> <span class="status"></span></li>
-    </ul>
-    <p id="error" role="alert" hidden></p>
-    <p id="done" hidden><span id="done-text"></span> <a id="download" class="button">Скачать</a></p>
-  </form>
+  <main>
+    <form id="analyze-form" class="row" novalidate>
+      <input id="url" name="url" type="url" inputmode="url" autocomplete="url" maxlength="2000"
+             aria-label="URL сайта" required>
+      <button id="analyze" type="submit">Проанализировать</button>
+      <span id="analyze-loading" class="spinner" role="status" aria-label="Загрузка" hidden></span>
+    </form>
+    <p id="analyze-error" class="error" role="alert" hidden></p>
+
+    <div id="result" hidden>
+      <section id="report">
+        <p id="no-advice" hidden>Серьёзных проблем не найдено</p>
+        <button id="report-toggle" class="toggle" type="button" aria-expanded="true" aria-controls="advice" hidden>
+          Что стоит поправить на сайте <span id="advice-count"></span>
+        </button>
+        <ul id="advice"></ul>
+      </section>
+
+      <form id="generate-form" novalidate>
+        <ul id="files"></ul>
+        <div class="row">
+          <button id="generate" type="submit">Сгенерировать</button>
+          <span id="generate-loading" class="spinner" role="status" aria-label="Загрузка" hidden></span>
+        </div>
+        <p id="generate-error" class="error" role="alert" hidden></p>
+        <div id="done" hidden>
+          <p><span id="done-text"></span> <a id="download" class="button">Скачать</a></p>
+          <p id="instruction-note" hidden></p>
+        </div>
+      </form>
+    </div>
+  </main>
 
   <script src="/static/app.js"></script>
 </body>

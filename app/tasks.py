@@ -54,6 +54,15 @@ def find_result(task_id: str) -> tuple[Path, str] | None:
     return None
 
 
+def instruction_text(files: list[str]) -> str:
+    """Файл-инструкция для архива: что за файлы внутри и что с ними делать.
+
+    Переносы строк CRLF — чтобы старый Блокнот Windows не склеил текст в одну строку.
+    """
+    parts = [f"{name}\r\n{config.FILE_ABOUT[name]}" for name in files]
+    return "\r\n\r\n".join(parts) + "\r\n"
+
+
 def _pack(task_id: str, produced: dict[str, Path], files: list[str]) -> None:
     """Один выбранный файл отдаём как есть, несколько — одним zip-архивом."""
     if len(files) == 1:
@@ -64,6 +73,7 @@ def _pack(task_id: str, produced: dict[str, Path], files: list[str]) -> None:
     with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in files:
             zf.write(produced[name], arcname=name)
+        zf.writestr(config.INSTRUCTION_NAME, instruction_text(files))
     os.replace(part, archive)
 
 

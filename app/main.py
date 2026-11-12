@@ -1,4 +1,4 @@
-"""FastAPI-приложение: страница, POST /generate, GET /status/{task_id}."""
+"""FastAPI-приложение: страница, POST /analyze, POST /generate, GET /status/{task_id}."""
 
 import asyncio
 import hashlib
@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import config, tasks
+from app import analysis, config, tasks
 from app.cleanup import cleanup_loop
 from app.validation import UrlError, scheme_given, validate_url
 
@@ -31,6 +31,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Генератор llms.txt", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+class AnalyzeRequest(BaseModel):
+    url: str
 
 
 class GenerateRequest(BaseModel):
@@ -61,6 +65,24 @@ INDEX_HTML = _index_with_versions()  # статика меняется толь�
 def index() -> HTMLResponse:
     # no-cache: саму страницу браузер каждый раз сверяет с сервером, иначе не увидит новые ссылки
     return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/analyze")
+def analyze_site(body: AnalyzeRequest):
+    """Смотрит сайт до генерации: какие файлы рекомендовать и что на сайте поправить.
+
+    Обычная (не async) функция: FastAPI выполнит её в отдельном потоке, запросы к сайту
+    не держат остальной сервис.
+    """
+    try:
+        url = validate_url(body.url)
+        return analysis.analyze(url, guess_scheme=not scheme_given(body.url))
+    except UrlError as exc:
+        return _error(422, str(exc))
+    except analysis.AnalysisError as exc:
+        return _error(422, str(exc))
+    except analysis.Busy:
+        return _error(429, analysis.BUSY)
 
 
 @app.post("/generate")
