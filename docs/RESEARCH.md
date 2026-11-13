@@ -167,3 +167,47 @@ https://www.debugbear.com/blog/lighthouse-seo-score ·
 https://www.searchenginejournal.com/what-is-the-best-title-tag-length-for-seo ·
 https://www.seroundtable.com/google-word-count-for-seo-google-rankings-35607.html ·
 https://dev.to/orzmar/your-robotstxt-says-gptbot-is-welcome-your-server-says-403-9f2
+
+## 5. Частые проблемы у тех, кто делает сайт сам (2026-11-13)
+
+Вопрос владельца: что чаще всего ломают непрофессионалы (вайбкодинг, конструкторы) и что наш сервис
+может поймать без нейросети. Источники — форумы, статьи-аудиты, новости; многие статьи от компаний,
+которые продают своё решение, поэтому цифры — ориентир, а не статистика.
+
+Что уже покрыто анализом: пустая главная без JS (проверка 5), `noindex`/`robots.txt` (1),
+title/description (7). Ниже — только то, что не покрыто и не мелочь. Это **предложения агента**,
+ничего не реализуется без «да» владельца.
+
+| # | Предложение | Почему стоит | Как проверить без ИИ | Сложность |
+|---|---|---|---|---|
+| А | Утечка ключей и файлов | Самая громкая беда вайбкод-сайтов: ключи OpenAI/Stripe/Supabase `service_role` вшиты в JS страницы; аудит 50 приложений — у 78% секреты в публичных переменных. Открытые `/.env` и `/.git/` — сотни тысяч сайтов в сканах | Скачать JS со страниц обхода, искать известные виды ключей по шаблону (`sk-…`, `sk_live_…`, JWT с `"role":"service_role"`, `AKIA…`); запросить `/.env`, `/.git/HEAD` | средняя |
+| Б | Превью ссылки в мессенджерах | Самая частая жалоба после «не индексируется»: в Telegram/WhatsApp/VK ссылка без картинки или с чужой (логотип Lovable, «Vite + React»). У большинства из 100 разобранных вайбкод-сайтов неполные OG-теги | Есть ли `og:title`, `og:image`; адрес картинки полный, по HTTPS, открывается, не WebP; заготовки шаблона в title/OG/favicon | низкая |
+| В | Персональные данные (152-ФЗ) | На сайте форма заявки, но нет политики конфиденциальности; или данные уходят в Google Forms/Analytics. Штрафы с 30.05.2025 — сотни тысяч рублей. Для российских сайтов (priisk.pro) — самое денежное | `<form>` с полями телефон/почта/имя и нет ссылки со словами «политика», «конфиденциальн», «персональн»; скрипты `google-analytics.com`, `googletagmanager.com`, ссылки `docs.google.com/forms` | низкая |
+| Г | `sitemap.xml` | Один из главных советов на вопрос «почему сайт не в поиске» (Тильда, Lovable); конструкторы и ИИ часто делают её с ошибками или не делают | Нет `/sitemap.xml` или в ней битые/чужие адреса. Файл можно сгенерировать из того, что уже обошли | средняя |
+
+Оговорки:
+- **А** — проверка двойного назначения: тем же способом злоумышленник найдёт ключ на чужом сайте.
+  Мы не знаем, чей сайт. Смягчение: не показывать сам ключ, только вид ключа и что делать
+  (отозвать и выпустить новый). Базу Supabase (включён ли RLS) **не проверять** — это уже доступ
+  к чужим данным. Ключи Firebase (`AIza…`) и Supabase `anon` публичны по задумке — не ругаться на них.
+- **В** — не юридическая консультация. Про Google Analytics эксперты спорят (запрет сбора в
+  иностранные базы с 01.07.2025 по 23-ФЗ), поэтому формулировка мягкая: «данные уходят за границу,
+  это риск». Генерировать текст политики не предлагаю — это работа юриста.
+- **Г** — в разделе 4 sitemap был «в запасе» с порогом ~5 страниц; для одностраничника не нужен.
+
+Не предлагаю (мелочь или нужен браузер/ИИ): alt у картинок, структура заголовков, скорость,
+favicon отдельно, старый год в подвале, проверка подключения Вебмастера (по HTML не видно).
+
+Источники: https://www.searchenginejournal.com/googles-john-mueller-flags-seo-issues-in-vibe-coded-website/558393/ ·
+https://dev.to/kaplich/i-analyzed-100-vibe-coded-websites-and-found-these-common-mistakes-5275 ·
+https://dev.to/rishabh_kumar_6d865c83a4d/i-audited-50-vibe-coded-apps-heres-what-broke-1pb6 ·
+https://www.wiz.io/blog/common-security-risks-in-vibe-coded-apps ·
+https://thenextweb.com/news/lovable-vibe-coding-security-crisis-exposed ·
+https://hackernoon.com/scanning-26-million-domains-for-exposed-env-files ·
+https://www.scworld.com/news/400000-websites-vulnerable-through-exposed-git-directories ·
+https://lovable.dev/faq/deployment/updates/opengraph-twitter-cards ·
+https://qna.habr.com/q/923897 · https://checkroi.ru/blog/og-preview-ne-rabotaet-rossiya/ ·
+https://ppc.world/articles/sbor-dannyh-klientov-cherez-veb-formy-kak-izbezhat-shtrafa-do-6-mln-rubley-v-2026-godu/ ·
+https://habr.com/ru/articles/994568 · https://skillbox.ru/media/marketing/s-1-iyulya-v-rossii-nelzya-ispolzovat-google-analytics/ ·
+https://sberbusiness.live/publications/sbor-dannih-cherez-inostrannie-servisi-i-otkaz-ot-uproschenki-zakoni-dlya-biznesa-v-iyule ·
+https://tilda.cc/ru/answers/a/seo/ · https://vc.ru/services/2856938-pochemu-vash-sait-na-tilde-nevidim-dlya-yandeksa
