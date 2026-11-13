@@ -22,6 +22,11 @@ LLMS_NOT_STANDARD = "У вас уже есть llms.txt, но он сделан 
 LLMS_STANDARD = "У вас уже есть llms.txt, сделанный по стандарту. Новый можно сделать, если хотите."
 NO_FULL = "На сайте нет llms-full.txt."
 HAS_FULL = "У вас уже есть llms-full.txt. Новый можно сделать, если хотите."
+# Черновик агента (docs/TASKS.md, 4.1.5)
+NO_SITEMAP = "На сайте нет sitemap.xml."
+NO_SITEMAP_ONE_PAGE = "На сайте нет sitemap.xml, но сайту из одной страницы карта почти ничего не даёт."
+HAS_SITEMAP = "У вас уже есть sitemap.xml. Новый можно сделать, если хотите."
+MAX_ROBOTS_SITEMAPS = 3  # сколько адресов из строк Sitemap: в robots.txt проверяем
 BAD_CERTIFICATE = (
     "У сайта неправильный сертификат https://, поэтому мы не можем безопасно его открыть. "
     "Исправьте сертификат в панели хостинга или укажите адрес с http://."
@@ -71,8 +76,20 @@ def _site_file(answer: probe.Response | Exception) -> bytes | None:
     return answer.body
 
 
-def offer_files(llms_txt: bytes | None, llms_full: bytes | None) -> list[FileOffer]:
-    """Правила рекомендаций (ответы владельца 2–4, docs/TASKS.md)."""
+def _is_sitemap(answer: probe.Response | Exception) -> bool:
+    """Ответ — настоящая карта сайта, а не главная, отданная на любой адрес."""
+    if isinstance(answer, Exception) or answer.status != 200 or probe.is_html(answer):
+        return False
+    return site_checks.looks_like_sitemap(answer.url or "", answer.body)
+
+
+def offer_files(
+    llms_txt: bytes | None, llms_full: bytes | None, has_sitemap: bool = False, many_pages: bool = True
+) -> list[FileOffer]:
+    """Правила рекомендаций (ответы владельца 2–4 по этапу 3 и 1 по этапу 4, docs/TASKS.md).
+
+    many_pages — с главной есть ссылки на другие страницы этого же сайта.
+    """
     if llms_txt is None:
         llms = FileOffer(config.LLMS_FILE, True, NO_LLMS, "")
     elif site_checks.llms_txt_is_standard(llms_txt):
@@ -83,7 +100,13 @@ def offer_files(llms_txt: bytes | None, llms_full: bytes | None) -> list[FileOff
         full = FileOffer(config.FULL_FILE, True, NO_FULL, "")
     else:
         full = FileOffer(config.FULL_FILE, False, HAS_FULL, "")
-    offers = [llms, full]
+    if has_sitemap:
+        sitemap = FileOffer(config.SITEMAP_FILE, False, HAS_SITEMAP, "")
+    elif many_pages:
+        sitemap = FileOffer(config.SITEMAP_FILE, True, NO_SITEMAP, "")
+    else:
+        sitemap = FileOffer(config.SITEMAP_FILE, False, NO_SITEMAP_ONE_PAGE, "")
+    offers = [llms, full, sitemap]
     for offer in offers:
         offer.about = config.FILE_ABOUT[offer.name]
     return offers
@@ -147,6 +170,7 @@ def _analyze(url: str, guess_scheme: bool) -> dict:
         llms_txt = pool.submit(_fetch, urljoin(root, "/llms.txt"))
         llms_full = pool.submit(_fetch, urljoin(root, "/llms-full.txt"))
         robots = pool.submit(_fetch, urljoin(root, "/robots.txt"))
+        sitemaps = [pool.submit(_fetch, urljoin(root, path)) for path in ("/sitemap.xml", "/sitemap_index.xml")]
         missing = pool.submit(_fetch, missing_page)
         https = pool.submit(https_state, main_url)
         pages = [pool.submit(_fetch, link) for link in links]
@@ -155,6 +179,13 @@ def _analyze(url: str, guess_scheme: bool) -> dict:
     robots_txt = None
     if isinstance(robots_answer, probe.Response) and robots_answer.status == 200 and not probe.is_html(robots_answer):
         robots_txt = robots_answer.body.decode("utf-8", errors="ignore")
+
+    has_sitemap = any(_is_sitemap(future.result()) for future in sitemaps)
+    if not has_sitemap and robots_txt:
+        # Карта может лежать по другому адресу — его пишут в robots.txt строкой «Sitemap:»
+        listed = site_checks.robots_sitemaps(robots_txt)[:MAX_ROBOTS_SITEMAPS]
+        with ThreadPoolExecutor(max_workers=config.ANALYSIS_PARALLEL_REQUESTS) as pool:
+            has_sitemap = any(_is_sitemap(answer) for answer in pool.map(_fetch, listed))
 
     missing_answer = missing.result()
     missing_status = missing_answer.status if isinstance(missing_answer, probe.Response) else None
@@ -176,7 +207,8 @@ def _analyze(url: str, guess_scheme: bool) -> dict:
     all_pages = [main] + other_pages
 
     advice = [
-        site_checks.check_closed_from_search(main, main_answer.headers, robots_txt),
+        site_checks.check_closed_in_robots(robots_txt),
+        site_checks.check_noindex(main, main_answer.headers),
         site_checks.check_https(https.result()),
         site_checks.check_broken_pages(other_pages),
         site_checks.check_empty_without_js(main_answer.body),
@@ -185,11 +217,15 @@ def _analyze(url: str, guess_scheme: bool) -> dict:
         site_checks.check_titles(all_pages),
         site_checks.check_not_found(missing_status),
     ]
-    files = offer_files(_site_file(llms_txt.result()), _site_file(llms_full.result()))
+    files = offer_files(
+        _site_file(llms_txt.result()), _site_file(llms_full.result()), has_sitemap, many_pages=bool(links)
+    )
     return {
         "status": "done",
         "url": url,
         "files": [asdict(offer) for offer in files],
-        "advice": [asdict(item) for item in advice if item],
+        # сначала важное, потом возможное; внутри группы — порядок проверок
+        "advice": [asdict(item) for item in sorted(filter(None, advice), key=lambda a: a.group != site_checks.IMPORTANT)],
         "instruction": config.INSTRUCTION_NAME,  # имя инструкции в архиве — для подписи на странице
+        "sitemap_partial_note": config.SITEMAP_PARTIAL_NOTE,  # пометка о неполной карте, {pages} — число страниц
     }

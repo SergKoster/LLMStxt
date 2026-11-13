@@ -94,6 +94,47 @@ def test_existing_llms_full_is_not_recommended(network):
     assert not files_of(analysis.analyze("https://example.com/"))["llms-full.txt"]["recommended"]
 
 
+SITEMAP = b'<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+
+
+def xml_file(url, body):
+    return Response(200, "application/xml", body, {}, url)
+
+
+def test_site_without_sitemap_gets_it_recommended(network):
+    network.update(site())
+    sitemap = files_of(analysis.analyze("https://example.com/"))["sitemap.xml"]
+    assert sitemap["recommended"] and sitemap["reason"] == analysis.NO_SITEMAP
+    assert sitemap["about"]
+
+
+def test_existing_sitemap_is_not_recommended(network):
+    network.update(site(**{"https://example.com/sitemap.xml": xml_file("https://example.com/sitemap.xml", SITEMAP)}))
+    sitemap = files_of(analysis.analyze("https://example.com/"))["sitemap.xml"]
+    assert not sitemap["recommended"] and sitemap["reason"] == analysis.HAS_SITEMAP
+
+
+def test_sitemap_listed_in_robots_txt_is_found(network):
+    network.update(site(**{
+        "https://example.com/robots.txt": text_file(
+            "https://example.com/robots.txt", b"User-agent: *\nAllow: /\nSitemap: https://example.com/maps/main.xml\n"
+        ),
+        "https://example.com/maps/main.xml": xml_file("https://example.com/maps/main.xml", SITEMAP),
+    }))
+    assert files_of(analysis.analyze("https://example.com/"))["sitemap.xml"]["reason"] == analysis.HAS_SITEMAP
+
+
+def test_main_page_instead_of_sitemap_means_no_sitemap(network):
+    network.update(site(**{"https://example.com/sitemap.xml": html_page("https://example.com/sitemap.xml")}))
+    assert files_of(analysis.analyze("https://example.com/"))["sitemap.xml"]["reason"] == analysis.NO_SITEMAP
+
+
+def test_one_page_site_gets_no_sitemap_recommendation(network):
+    network.update(site(**{"https://example.com/": html_page("https://example.com/", body='<a href="#about">О нас</a>' + TEXT)}))
+    sitemap = files_of(analysis.analyze("https://example.com/"))["sitemap.xml"]
+    assert not sitemap["recommended"] and sitemap["reason"] == analysis.NO_SITEMAP_ONE_PAGE
+
+
 def test_problems_become_advice(network):
     network.update(site(**{
         "http://example.com/": Response(
@@ -114,15 +155,16 @@ def test_problems_become_advice(network):
         return real_fetch(url, user_agent, timeout)
 
     probe.fetch = fetch
-    titles = {item["title"] for item in analysis.analyze("http://example.com/")["advice"]}
-    assert titles == {
-        "Сайт закрыт от поисковиков",
-        "Сайт не открывается по защищённому адресу https://",
-        "Часть страниц открывается с ошибкой",
-        "Без скриптов на главной странице почти нет текста",
-        "Нет заголовка или описания для поиска",
-        "Несуществующие страницы не отвечают ошибкой 404",
-    }
+    advice = analysis.analyze("http://example.com/")["advice"]
+    # сначала важное, потом возможное
+    assert [(item["group"], item["title"]) for item in advice] == [
+        ("important", "Сайт не открывается по защищённому адресу https://"),
+        ("important", "Часть страниц открывается с ошибкой"),
+        ("possible", "Главная страница скрыта от поиска"),
+        ("possible", "Без скриптов на главной странице почти нет текста"),
+        ("possible", "Нет заголовка или описания для поиска"),
+        ("possible", "Несуществующие страницы не отвечают ошибкой 404"),
+    ]
 
 
 def test_bad_certificate_on_https_version(network):

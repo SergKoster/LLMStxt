@@ -4,20 +4,28 @@ import uuid
 import zipfile
 
 from app import config, tasks
-from app.generator import GenerationError
+from app.generator import GenerationError, Produced
 
 LLMS_BYTES = b"# Example\n"
 FULL_BYTES = b"# Example\n\nFull text.\n"
+SITEMAP_BYTES = b'<?xml version="1.0" encoding="UTF-8"?>\n<urlset></urlset>\n'
 
 
-def fake_generate(url, work_dir, full=False, guess_scheme=False):
-    """Подмена генератора: кладёт файлы в рабочую папку, как настоящий."""
+def fake_generate(url, work_dir, full=False, guess_scheme=False, sitemap=False, partial=None):
+    """Подмена генератора: кладёт файлы в рабочую папку, как настоящий.
+
+    partial — сколько страниц в неполной карте сайта (как будто обход упёрся в предел).
+    """
     work_dir.mkdir(parents=True)
-    produced = {"llms.txt": work_dir / "llms.txt"}
+    produced = Produced({"llms.txt": work_dir / "llms.txt"})
     produced["llms.txt"].write_bytes(LLMS_BYTES)
     if full:
         produced["llms-full.txt"] = work_dir / "llms-full.txt"
         produced["llms-full.txt"].write_bytes(FULL_BYTES)
+    if sitemap:
+        produced["sitemap.xml"] = work_dir / "sitemap.xml"
+        produced["sitemap.xml"].write_bytes(SITEMAP_BYTES)
+        produced.sitemap_partial = partial
     return produced
 
 
@@ -80,6 +88,30 @@ def test_two_files_come_as_archive(client, monkeypatch):
             assert config.FILE_ABOUT[name] in instruction
 
 
+def test_only_sitemap_comes_as_xml_without_llms_txt(client, monkeypatch):
+    monkeypatch.setattr(tasks, "generate", fake_generate)
+    status = start(client, ["sitemap.xml"])
+    assert status.headers["content-disposition"] == 'attachment; filename="sitemap.xml"'
+    assert status.headers["content-type"].startswith("application/xml")
+    assert status.content == SITEMAP_BYTES
+    assert "x-sitemap-partial" not in status.headers  # карта полная — пометки нет
+
+
+def test_partial_sitemap_is_marked_on_page_and_in_instruction(client, monkeypatch):
+    monkeypatch.setattr(tasks, "generate", lambda *args, **kwargs: fake_generate(*args, **kwargs, partial=50))
+    status = start(client, ["sitemap.xml", "llms.txt"])
+    assert status.headers["x-sitemap-partial"] == "50"
+    with zipfile.ZipFile(io.BytesIO(status.content)) as archive:
+        assert archive.namelist() == ["llms.txt", "sitemap.xml", config.INSTRUCTION_NAME]
+        instruction = archive.read(config.INSTRUCTION_NAME).decode("utf-8")
+        assert config.SITEMAP_PARTIAL_NOTE.format(pages=50) in instruction
+
+
+def test_partial_note_only_when_sitemap_chosen(client, monkeypatch):
+    monkeypatch.setattr(tasks, "generate", lambda *args, **kwargs: fake_generate(*args, **kwargs, partial=50))
+    assert "x-sitemap-partial" not in start(client, ["llms.txt"]).headers
+
+
 def test_nothing_or_unknown_file_selected(client):
     for files in ([], ["robots.txt"], ["llms.txt", "../etc/passwd"]):
         response = client.post("/generate", json={"url": "https://example.com", "files": files})
@@ -93,7 +125,7 @@ def test_status_processing(client):
 
 
 def test_status_error_has_text(client, monkeypatch):
-    def failing(url, work_dir, full=False, guess_scheme=False):
+    def failing(url, work_dir, full=False, guess_scheme=False, sitemap=False):
         raise GenerationError("Сайт не отвечает.")
 
     monkeypatch.setattr(tasks, "generate", failing)
@@ -104,7 +136,7 @@ def test_status_error_has_text(client, monkeypatch):
 
 
 def test_unexpected_crash_becomes_error_not_500(client, monkeypatch):
-    def crashing(url, work_dir, full=False, guess_scheme=False):
+    def crashing(url, work_dir, full=False, guess_scheme=False, sitemap=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(tasks, "generate", crashing)
@@ -124,7 +156,7 @@ def test_nonexistent_site_is_clear_error(client):
 def test_url_without_scheme_is_accepted_and_guessed(client, monkeypatch):
     calls = []
 
-    def generate(url, work_dir, full=False, guess_scheme=False):
+    def generate(url, work_dir, full=False, guess_scheme=False, sitemap=False):
         calls.append((url, guess_scheme))
         return fake_generate(url, work_dir, full)
 

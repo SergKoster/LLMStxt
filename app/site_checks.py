@@ -26,6 +26,13 @@ _FILE_EXTENSIONS = (
 _SEARCH_ROBOTS = (("*",), ("googlebot",), ("yandexbot", "yandex"))
 
 
+# Группы советов (решение владельца 2026-11-13, docs/TASKS.md, 4.2):
+# «важное» — сервис проверяет надёжно и ошибка очевидна;
+# «возможное» — сервис это видит, но владелец сайта мог сделать так нарочно.
+IMPORTANT = "important"
+POSSIBLE = "possible"
+
+
 @dataclass
 class Advice:
     """Найденная проблема: короткая строка и разворачиваемое «что сделать»."""
@@ -33,6 +40,7 @@ class Advice:
     title: str
     details: list[str]
     code: str = ""  # готовая строка для вставки, если есть
+    group: str = IMPORTANT
 
 
 @dataclass
@@ -223,6 +231,25 @@ def parse_robots(text: str) -> dict[str, list[tuple[bool, str]]]:
     return groups
 
 
+def robots_sitemaps(text: str) -> list[str]:
+    """Адреса карт сайта из строк «Sitemap: …» в robots.txt (строка действует вне групп)."""
+    result = []
+    for line in text.splitlines():
+        key, _, value = line.split("#", 1)[0].partition(":")
+        value = value.strip()
+        if key.strip().lower() == "sitemap" and value.startswith(("http://", "https://")) and value not in result:
+            result.append(value)
+    return result
+
+
+def looks_like_sitemap(url: str, body: bytes) -> bool:
+    """Это карта сайта: XML с <urlset> или <sitemapindex>, или сжатый файл .gz по адресу из robots.txt."""
+    if url.lower().split("?", 1)[0].endswith(".gz"):
+        return body[:2] == b"\x1f\x8b"
+    head = body[:4096].lower()
+    return b"<urlset" in head or b"<sitemapindex" in head
+
+
 def _rule_matches(pattern: str, path: str) -> bool:
     regex = re.escape(pattern).replace(r"\*", ".*")
     if regex.endswith(r"\$"):
@@ -247,8 +274,27 @@ def robots_allows(groups: dict[str, list[tuple[bool, str]]], names: tuple[str, .
     return best is None or best[1]
 
 
-def check_closed_from_search(main: Page, headers: dict[str, str], robots_txt: str | None) -> Advice | None:
-    """1. Сайт закрыт от поисковиков: noindex на главной или Disallow: / в robots.txt."""
+def check_closed_in_robots(robots_txt: str | None) -> Advice | None:
+    """1а. robots.txt закрывает весь сайт для всех роботов, Google или Яндекса. Важное."""
+    if robots_txt is None:
+        return None
+    groups = parse_robots(robots_txt)
+    if all(robots_allows(groups, names, "/") for names in _SEARCH_ROBOTS):
+        return None
+    return Advice(
+        "Сайт закрыт от поисковиков",
+        [
+            "Файл robots.txt запрещает поисковикам обходить сайт (строка «Disallow: /»). "
+            "Уберите её или оставьте запрет только для служебных разделов."
+        ],
+    )
+
+
+def check_noindex(main: Page, headers: dict[str, str]) -> Advice | None:
+    """1б. Запрет на показ в поиске (noindex) на главной или в заголовке ответа.
+
+    Возможное: так нарочно закрывают тестовую копию или закрытый сайт.
+    """
     details = []
     if any(_forbids_index(content) for content in main.robots_meta):
         details.append(
@@ -261,17 +307,9 @@ def check_closed_from_search(main: Page, headers: dict[str, str], robots_txt: st
             "Сервер отдаёт заголовок X-Robots-Tag: noindex — он запрещает показывать сайт в поиске. "
             "Уберите его в настройках хостинга или попросите разработчика."
         )
-    if robots_txt is not None:
-        groups = parse_robots(robots_txt)
-        blocked = [names for names in _SEARCH_ROBOTS if not robots_allows(groups, names, "/")]
-        if blocked:
-            details.append(
-                "Файл robots.txt запрещает поисковикам обходить сайт (строка «Disallow: /»). "
-                "Уберите её или оставьте запрет только для служебных разделов."
-            )
     if not details:
         return None
-    return Advice("Сайт закрыт от поисковиков", details)
+    return Advice("Главная страница скрыта от поиска", details, group=POSSIBLE)
 
 
 def check_https(https_state: str) -> Advice | None:
@@ -319,6 +357,7 @@ def check_empty_without_js(main_body: bytes) -> Advice | None:
             "не всегда, а большинство ИИ-ассистентов не видят совсем. Попросите разработчика включить "
             "серверную или предварительную отрисовку страниц (SSR или pre-rendering)."
         ],
+        group=POSSIBLE,  # так устроены сайты на React/Vue — это выбор, а не поломка
     )
 
 
@@ -336,6 +375,7 @@ def check_viewport(main: Page) -> Advice | None:
             "как уменьшенная копия компьютерной версии. Добавьте эту строку внутрь <head>:"
         ],
         code=VIEWPORT_TAG,
+        group=POSSIBLE,  # проверка отключена (решение владельца 2026-11-13: не возвращать)
     )
 
 
@@ -379,7 +419,8 @@ def check_titles(pages: list[Page]) -> Advice | None:
         "Задайте каждой странице свой заголовок и короткое описание. В конструкторах сайтов это "
         "обычно настройки SEO страницы."
     )
-    return Advice("Нет заголовка или описания для поиска", details)
+    # Возможное: иногда страницы служебные и в поиск не нужны
+    return Advice("Нет заголовка или описания для поиска", details, group=POSSIBLE)
 
 
 def check_not_found(status_of_missing_page: int | None) -> Advice | None:
@@ -393,4 +434,5 @@ def check_not_found(status_of_missing_page: int | None) -> Advice | None:
             "Поисковики могут принять такие адреса за настоящие страницы. Настройте ответ 404 "
             "для несуществующих страниц в панели хостинга или попросите разработчика."
         ],
+        group=POSSIBLE,  # так нарочно настраивают одностраничные приложения на JS
     )

@@ -2,23 +2,39 @@
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 import urllib.request
 import urllib.robotparser
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
+from xml.sax.saxutils import escape
 
 from app import config, probe
 
 log = logging.getLogger("llms.generator")
 
 ROBOTS_USER_AGENT = "llms-generator"  # под этим именем llms-gen читает robots.txt
+MAX_PAGES_WARNING = "Reached --max-pages limit"  # так llms-gen пишет, что обход упёрся в предел
+
+# Адрес страницы в пункте llms.txt: «- [название](адрес)» или «- [название](адрес): описание»
+_ENTRY_URL = re.compile(r"^- \[.*?\]\((https?://[^\s)]+)\)")
 
 
 class GenerationError(Exception):
     """Генерация не удалась. Текст ошибки показывается пользователю."""
+
+
+class Produced(dict):
+    """Готовые файлы {имя: путь}.
+
+    sitemap_partial — сколько страниц в карте сайта, если она неполная (обход упёрся в предел
+    страниц). Карта полная или её не просили — None.
+    """
+
+    sitemap_partial: int | None = None
 
 
 def find_llms_gen() -> str:
@@ -95,11 +111,57 @@ def fix_broken_entries(text: str) -> str:
     return "\n".join(result) + "\n"
 
 
-def generate(url: str, work_dir: Path, full: bool = False, guess_scheme: bool = False) -> dict[str, Path]:
-    """Создаёт в папке work_dir файл llms.txt и, если full, ещё llms-full.txt.
+def _same_site(host_a: str, host_b: str) -> bool:
+    strip = lambda host: host.lower().removeprefix("www.")  # noqa: E731
+    return strip(host_a) == strip(host_b)
+
+
+def _encode_url(url: str) -> str:
+    """Адрес, как его требует протокол sitemaps.org: домен в punycode, в пути нет кириллицы и пробелов."""
+    parts = urlsplit(url)
+    host = parts.hostname.encode("idna").decode("ascii") if parts.hostname else ""
+    netloc = f"{host}:{parts.port}" if parts.port else host
+    safe = "/%:@!$&'()*+,;=-._~"
+    return urlunsplit((parts.scheme, netloc, quote(parts.path, safe=safe) or "/", quote(parts.query, safe=safe + "?"), ""))
+
+
+def sitemap_urls(llms_txt: str, site_url: str) -> list[str]:
+    """Адреса для карты сайта из пунктов llms.txt: главная первой, без повторов и чужих сайтов."""
+    host = urlsplit(site_url).hostname or ""
+    entries = [m.group(1) for line in llms_txt.splitlines() if (m := _ENTRY_URL.match(line.strip()))]
+    # Главную берём с той же схемой и доменом, что у прочитанных страниц (после переадресаций)
+    candidates = [urljoin(entries[0] if entries else site_url, "/")] + entries
+    result, seen = [], set()
+    for url in candidates:
+        parsed = urlsplit(url)
+        if not parsed.hostname or not _same_site(parsed.hostname, host):
+            continue
+        encoded = _encode_url(url)
+        key = encoded.rstrip("/")  # /about и /about/ — одна страница
+        if key not in seen:
+            seen.add(key)
+            result.append(encoded)
+    return result
+
+
+def build_sitemap(urls: list[str]) -> str:
+    """sitemap.xml по протоколу sitemaps.org. Дату изменения (lastmod) не пишем: настоящих дат мы не знаем."""
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    lines += [f"  <url><loc>{escape(url)}</loc></url>" for url in urls]
+    lines.append("</urlset>")
+    return "\n".join(lines) + "\n"
+
+
+def generate(
+    url: str, work_dir: Path, full: bool = False, guess_scheme: bool = False, sitemap: bool = False
+) -> Produced:
+    """Создаёт в папке work_dir llms.txt, если full — ещё llms-full.txt, если sitemap — sitemap.xml.
+
+    Карту сайта собираем из адресов страниц, которые llms-gen прочитал для llms.txt: свой
+    обход не нужен, а страницы с запретом на поиск (noindex) llms-gen пропускает сам.
 
     guess_scheme — схему в url подставили мы, а не пользователь: сначала пробуем https, потом http.
-    Возвращает {имя файла: путь}. При неудаче бросает GenerationError;
+    Возвращает Produced {имя файла: путь}. При неудаче бросает GenerationError;
     папку work_dir убирает тот, кто вызвал.
     """
     if guess_scheme:
@@ -107,7 +169,7 @@ def generate(url: str, work_dir: Path, full: bool = False, guess_scheme: bool = 
         if url is None:
             raise GenerationError(probe.NO_SCHEME)
     work_dir.mkdir(parents=True, exist_ok=True)
-    produced = {config.LLMS_FILE: work_dir / config.LLMS_FILE}
+    produced = Produced({config.LLMS_FILE: work_dir / config.LLMS_FILE})
     if full:
         produced[config.FULL_FILE] = work_dir / config.FULL_FILE
     max_pages = pick_max_pages(read_crawl_delay(url))
@@ -146,4 +208,10 @@ def generate(url: str, work_dir: Path, full: bool = False, guess_scheme: bool = 
 
     for path in produced.values():
         path.write_text(fix_broken_entries(path.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
+    if sitemap:
+        urls = sitemap_urls(produced[config.LLMS_FILE].read_text(encoding="utf-8"), url)
+        produced[config.SITEMAP_FILE] = work_dir / config.SITEMAP_FILE
+        produced[config.SITEMAP_FILE].write_text(build_sitemap(urls), encoding="utf-8", newline="\n")
+        if MAX_PAGES_WARNING in result.stderr:
+            produced.sitemap_partial = len(urls)
     return produced

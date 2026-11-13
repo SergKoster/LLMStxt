@@ -13,7 +13,12 @@ const result = $("result");
 const noAdvice = $("no-advice");
 const reportToggle = $("report-toggle");
 const adviceCount = $("advice-count");
-const adviceList = $("advice");
+const adviceList = $("advice"); // весь отчёт: обе группы
+const noImportant = $("no-important");
+const importantGroup = $("important-group");
+const importantList = $("important-list");
+const possibleGroup = $("possible-group");
+const possibleList = $("possible-list");
 
 const generateForm = $("generate-form");
 const filesList = $("files");
@@ -24,6 +29,7 @@ const doneBox = $("done");
 const doneText = $("done-text");
 const downloadLink = $("download");
 const instructionNote = $("instruction-note");
+const sitemapNote = $("sitemap-note");
 
 let analysis = null; // ответ POST /analyze для текущего адреса
 let fileRows = []; // {box, status} для каждого файла
@@ -128,8 +134,19 @@ function adviceItem(item, index) {
   return element("li", {}, [button, panel]);
 }
 
+// Группа советов: «важное» (ошибка очевидна) или «возможное» (могло быть сделано нарочно).
+function fillGroup(group, list, items, offset) {
+  list.replaceChildren(...items.map((item, i) => adviceItem(item, offset + i)));
+  group.hidden = items.length === 0;
+  setExpanded(group.querySelector(".group-title"), list, true); // группа сначала развёрнута
+}
+
 function showReport(advice) {
-  adviceList.replaceChildren(...advice.map(adviceItem));
+  const important = advice.filter((item) => item.group === "important");
+  const possible = advice.filter((item) => item.group !== "important");
+  fillGroup(importantGroup, importantList, important, 0);
+  fillGroup(possibleGroup, possibleList, possible, important.length);
+  noImportant.hidden = important.length > 0; // важного нет, но есть возможное
   const any = advice.length > 0;
   noAdvice.hidden = any;
   reportToggle.hidden = !any;
@@ -138,6 +155,10 @@ function showReport(advice) {
 }
 
 reportToggle.addEventListener("click", () => setExpanded(reportToggle, adviceList, adviceList.hidden));
+for (const [group, list] of [[importantGroup, importantList], [possibleGroup, possibleList]]) {
+  const button = group.querySelector(".group-title");
+  button.addEventListener("click", () => setExpanded(button, list, list.hidden));
+}
 
 // --- Шаг 2: выбор файлов ---
 
@@ -206,7 +227,8 @@ function setGenerating(state, text) {
   else setFileStatus("");
 }
 
-function offerFile(blob) {
+// partialPages — сколько страниц в неполной карте сайта (заголовок X-Sitemap-Partial), иначе null
+function offerFile(blob, partialPages) {
   const isArchive = chosen.length > 1;
   if (fileUrl) URL.revokeObjectURL(fileUrl);
   fileUrl = URL.createObjectURL(blob);
@@ -215,6 +237,8 @@ function offerFile(blob) {
   doneText.textContent = isArchive ? "Ваш архив готов" : "Ваш файл готов";
   instructionNote.hidden = !isArchive;
   instructionNote.textContent = isArchive ? `Инструкция — в файле ${analysis.instruction} внутри архива.` : "";
+  sitemapNote.hidden = !partialPages;
+  sitemapNote.textContent = partialPages ? analysis.sitemap_partial_note.replace("{pages}", partialPages) : "";
   setGenerating("done");
 }
 
@@ -230,7 +254,7 @@ async function poll(taskId) {
 
   const type = response.headers.get("content-type") || "";
   if (!type.includes("application/json")) {
-    if (response.ok) offerFile(await response.blob());
+    if (response.ok) offerFile(await response.blob(), response.headers.get("x-sitemap-partial"));
     else setGenerating("error", errorText(null));
     return;
   }

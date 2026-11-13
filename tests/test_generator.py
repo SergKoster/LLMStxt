@@ -143,6 +143,52 @@ def test_generate_no_pages(tmp_path, monkeypatch):
         generate("https://example.com", tmp_path / "work")
 
 
+SITE_WITH_PAGES = (
+    "# Сайт\n\n## Страницы\n\n"
+    "- [Главная](https://www.example.com/)\n"
+    "- [О нас](https://www.example.com/about/): описание\n"
+    "- [О нас ещё раз](https://www.example.com/about)\n"
+    "- [Цены & скидки](https://www.example.com/цены?a=1&b=2)\n"
+    "- [Чужой сайт](https://other.com/page)\n"
+).encode()
+
+
+def test_sitemap_urls_come_from_llms_txt_entries():
+    urls = generator.sitemap_urls(SITE_WITH_PAGES.decode(), "https://example.com")
+    assert urls == [
+        "https://www.example.com/",  # главная — с тем же доменом, что у прочитанных страниц
+        "https://www.example.com/about/",  # /about и /about/ — одна страница
+        "https://www.example.com/%D1%86%D0%B5%D0%BD%D1%8B?a=1&b=2",  # кириллица закодирована
+    ]
+
+
+def test_sitemap_main_page_is_added_when_missing():
+    text = "# Сайт\n\n## Страницы\n\n- [A](https://example.com/a)\n"
+    assert generator.sitemap_urls(text, "https://example.com") == ["https://example.com/", "https://example.com/a"]
+
+
+def test_sitemap_xml_is_escaped():
+    xml = generator.build_sitemap(["https://example.com/?a=1&b=2"])
+    assert xml.startswith('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
+    assert "<loc>https://example.com/?a=1&amp;b=2</loc>" in xml
+    assert "lastmod" not in xml
+
+
+def test_generate_sitemap(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", fake_run(content=SITE_WITH_PAGES))
+    produced = generate("https://example.com", tmp_path / "work", sitemap=True)
+    assert list(produced) == ["llms.txt", "sitemap.xml"]
+    assert "<loc>https://www.example.com/about/</loc>" in produced["sitemap.xml"].read_text(encoding="utf-8")
+    assert produced.sitemap_partial is None
+
+
+def test_sitemap_is_partial_when_crawl_hit_the_limit(tmp_path, monkeypatch):
+    stderr = "WARNING llms_generator.crawler: Reached --max-pages limit (50); stopping crawl.\n"
+    monkeypatch.setattr(subprocess, "run", fake_run(stderr=stderr, content=SITE_WITH_PAGES))
+    produced = generate("https://example.com", tmp_path / "work", sitemap=True)
+    assert produced.sitemap_partial == 3
+
+
 def test_generate_empty_file_is_an_error(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run(0, "", b""))
     with pytest.raises(GenerationError):

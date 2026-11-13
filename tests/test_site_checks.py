@@ -103,7 +103,8 @@ def test_not_standard_llms_txt(body):
 
 def test_good_site_has_no_advice():
     main = page()
-    assert site_checks.check_closed_from_search(main, {}, "User-agent: *\nDisallow: /admin\n") is None
+    assert site_checks.check_closed_in_robots("User-agent: *\nDisallow: /admin\n") is None
+    assert site_checks.check_noindex(main, {}) is None
     assert site_checks.check_https("ok") is None
     assert site_checks.check_broken_pages([page("https://example.com/a")]) is None
     assert site_checks.check_empty_without_js(html()) is None
@@ -114,18 +115,39 @@ def test_good_site_has_no_advice():
 
 
 @pytest.mark.parametrize(
-    ("head", "headers", "robots"),
+    ("head", "headers"),
     [
-        (GOOD_HEAD + '<meta name="robots" content="noindex, follow">', {}, None),
-        (GOOD_HEAD + '<meta name="yandex" content="none">', {}, None),
-        (GOOD_HEAD, {"x-robots-tag": "googlebot: noindex"}, None),
-        (GOOD_HEAD, {}, "User-agent: *\nDisallow: /\n"),
-        (GOOD_HEAD, {}, "User-agent: Yandex\nDisallow: /\n"),
+        (GOOD_HEAD + '<meta name="robots" content="noindex, follow">', {}),
+        (GOOD_HEAD + '<meta name="yandex" content="none">', {}),
+        (GOOD_HEAD, {"x-robots-tag": "googlebot: noindex"}),
     ],
 )
-def test_closed_from_search(head, headers, robots):
-    advice = site_checks.check_closed_from_search(page(head=head), headers, robots)
+def test_noindex_is_possible_advice(head, headers):
+    advice = site_checks.check_noindex(page(head=head), headers)
+    assert advice and advice.title == "Главная страница скрыта от поиска"
+    assert advice.group == site_checks.POSSIBLE
+
+
+@pytest.mark.parametrize("robots", ["User-agent: *\nDisallow: /\n", "User-agent: Yandex\nDisallow: /\n"])
+def test_closed_in_robots_is_important_advice(robots):
+    advice = site_checks.check_closed_in_robots(robots)
     assert advice and advice.title == "Сайт закрыт от поисковиков"
+    assert advice.group == site_checks.IMPORTANT
+
+
+def test_each_check_has_its_group():
+    important = [
+        site_checks.check_https("none"),
+        site_checks.check_https("bad_certificate"),
+        site_checks.check_broken_pages([page("https://example.com/a", status=404)]),
+    ]
+    possible = [
+        site_checks.check_empty_without_js(b"<html><body><div id='root'></div><script></script></body></html>"),
+        site_checks.check_titles([page(head="")]),
+        site_checks.check_not_found(200),
+    ]
+    assert all(advice and advice.group == site_checks.IMPORTANT for advice in important)
+    assert all(advice and advice.group == site_checks.POSSIBLE for advice in possible)
 
 
 @pytest.mark.parametrize(
@@ -142,7 +164,7 @@ def test_closed_from_search(head, headers, robots):
     ],
 )
 def test_robots_that_do_not_close_the_site(robots):
-    assert site_checks.check_closed_from_search(page(), {}, robots) is None
+    assert site_checks.check_closed_in_robots(robots) is None
 
 
 def test_robots_longest_rule_wins():
@@ -206,3 +228,21 @@ def test_one_inner_page_without_description_is_not_worth_advice():
                                                    '<meta name="description" content="x">') for i in range(4)]
     pages.append(page("https://example.com/service", head="<title>Служебная</title>"))
     assert site_checks.check_titles(pages) is None
+
+
+def test_robots_sitemaps_are_read_outside_groups():
+    text = (
+        "User-agent: *\nDisallow: /admin\n"
+        "Sitemap: https://example.com/sitemap.xml  # основная\n"
+        "sitemap: https://example.com/news.xml\n"
+        "Sitemap: /relative.xml\n"
+        "Sitemap: https://example.com/sitemap.xml\n"
+    )
+    assert site_checks.robots_sitemaps(text) == ["https://example.com/sitemap.xml", "https://example.com/news.xml"]
+
+
+def test_looks_like_sitemap():
+    assert site_checks.looks_like_sitemap("https://e.com/sitemap.xml", b'<?xml version="1.0"?><urlset>')
+    assert site_checks.looks_like_sitemap("https://e.com/s.xml", b"<?xml version='1.0'?>\n<sitemapindex>")
+    assert site_checks.looks_like_sitemap("https://e.com/s.xml.gz", b"\x1f\x8b\x08rest")
+    assert not site_checks.looks_like_sitemap("https://e.com/sitemap.xml", b"just text")

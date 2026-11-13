@@ -27,7 +27,17 @@
         <button id="report-toggle" class="toggle" type="button" aria-expanded="true" aria-controls="advice" hidden>
           Что стоит поправить на сайте <span id="advice-count"></span>
         </button>
-        <ul id="advice"></ul>
+        <div id="advice">
+          <p id="no-important" hidden>Серьёзных проблем не найдено</p>
+          <div id="important-group" class="advice-group" hidden>
+            <button class="toggle group-title" type="button" aria-expanded="true" aria-controls="important-list">Важно исправить</button>
+            <ul id="important-list" class="advice-list"></ul>
+          </div>
+          <div id="possible-group" class="advice-group" hidden>
+            <button class="toggle group-title" type="button" aria-expanded="true" aria-controls="possible-list">Возможно, стоит поправить</button>
+            <ul id="possible-list" class="advice-list"></ul>
+          </div>
+        </div>
       </section>
 
       <form id="generate-form" novalidate>
@@ -40,6 +50,7 @@
         <div id="done" hidden>
           <p><span id="done-text"></span> <a id="download" class="button">Скачать</a></p>
           <p id="instruction-note" hidden></p>
+          <p id="sitemap-note" hidden></p>
         </div>
       </form>
     </div>

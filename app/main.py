@@ -19,6 +19,8 @@ from app.validation import UrlError, scheme_given, validate_url
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 STATIC_DIR = Path(__file__).parent / "static"
+SITEMAP_PARTIAL_HEADER = "X-Sitemap-Partial"
+_MEDIA_TYPES = {".zip": "application/zip", ".xml": "application/xml; charset=utf-8"}
 
 
 @asynccontextmanager
@@ -123,6 +125,10 @@ def get_status(task_id: str):
     result = tasks.find_result(task_id)
     if result:
         path, download_name = result
-        media_type = "application/zip" if path.suffix == ".zip" else "text/plain; charset=utf-8"
-        return FileResponse(path, media_type=media_type, filename=download_name)
+        media_type = _MEDIA_TYPES.get(path.suffix, "text/plain; charset=utf-8")
+        headers = {}
+        if task and task.sitemap_partial:
+            # Карта сайта неполная — страница покажет пометку (сколько страниц вошло)
+            headers[SITEMAP_PARTIAL_HEADER] = str(task.sitemap_partial)
+        return FileResponse(path, media_type=media_type, filename=download_name, headers=headers)
     return _error(404, "Задача не найдена или файл уже удалён. Сгенерируйте заново.")

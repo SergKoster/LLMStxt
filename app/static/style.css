@@ -95,7 +95,9 @@ p { margin: 0; }
 .toggle::before { content: "▸ "; color: var(--accent); }
 .toggle[aria-expanded="true"]::before { content: "▾ "; }
 
-#advice { margin: 0; padding: 0 0 0 16px; list-style: none; }
+#advice { padding: 0 0 0 16px; }
+#no-important { margin: 4px 0; }
+.advice-list { margin: 0; padding: 0 0 0 16px; list-style: none; }
 .advice-title { font-weight: 400; }
 .advice-details { padding: 0 0 8px 18px; color: var(--muted); }
 .advice-details p + p, .advice-details code { margin-top: 4px; }
